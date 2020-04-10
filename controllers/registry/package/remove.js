@@ -22,10 +22,9 @@ module.exports = function* remove(next) {
     return yield next;
   }
 
-  yield [
-    packageService.removeModulesByName(name),
-    packageService.removeModuleTags(name),
-    totalService.plusDeleteModule(),
+  yield [packageService.removeModulesByName(name),
+         packageService.removeModuleTags(name),
+         totalService.plusDeleteModule(),
   ];
 
   if (config.unpublishRemoveTarball) {
@@ -41,9 +40,7 @@ module.exports = function* remove(next) {
     }
 
     try {
-      yield keys.map(function (key) {
-        return nfs.remove(key);
-      });
+      yield keys.map(function(key) { return nfs.remove(key); });
     } catch (err) {
       logger.error(err);
     }
@@ -52,5 +49,5 @@ module.exports = function* remove(next) {
   // remove the maintainers
   yield packageService.removeAllMaintainers(name);
 
-  this.body = { ok: true };
+  this.body = {ok : true};
 };

@@ -28,15 +28,17 @@ module.exports = function* show(next) {
   var version = semver.valid(tag || '');
   if (version) {
     getPackageMethod = 'getModule';
-    getPackageArgs = [name, version];
+    getPackageArgs = [ name, version ];
   } else {
     getPackageMethod = 'getModuleByTag';
-    getPackageArgs = [name, tag || 'latest'];
+    getPackageArgs = [ name, tag || 'latest' ];
   }
 
-  var pkg = yield packageService[getPackageMethod].apply(packageService, getPackageArgs);
+  var pkg = yield packageService[getPackageMethod].apply(packageService,
+                                                         getPackageArgs);
   if ((!pkg || !pkg.package) && tag) {
-    // + if we can't find it by tag, it may be a non-semver version, check it then
+    // + if we can't find it by tag, it may be a non-semver version, check it
+    // then
     // + if we can't find it by version, it may be a tag, check it then
     getPackageMethod = version ? 'getModuleByTag' : 'getModule';
     pkg = yield packageService[getPackageMethod](name, tag);
@@ -48,37 +50,32 @@ module.exports = function* show(next) {
     var unpublishedInfo = yield packageService.getUnpublishedModule(name);
     debug('show unpublished %j', unpublishedInfo);
     if (unpublishedInfo) {
-      var data = {
-        name: name,
-        unpublished: unpublishedInfo.package
-      };
+      var data = {name : name, unpublished : unpublishedInfo.package};
       data.unpublished.time = new Date(data.unpublished.time);
       if (data.unpublished.maintainers) {
         for (var i = 0; i < data.unpublished.maintainers.length; i++) {
           var maintainer = data.unpublished.maintainers[i];
           if (maintainer.email) {
-            maintainer.gravatar = gravatar.url(maintainer.email, {s: '50', d: 'retro'}, true);
+            maintainer.gravatar =
+                gravatar.url(maintainer.email, {s : '50', d : 'retro'}, true);
           }
         }
       }
-      yield this.render('package_unpublished', {
-        package: data,
-        title: 'Package - ' + name
-      });
+      yield this.render('package_unpublished',
+                        {package : data, title : 'Package - ' + name});
       return;
     }
 
     return yield next;
   }
 
-  var r = yield [
-    utils.getDownloadTotal(name),
-    packageService.listDependents(name),
-    packageService.listStarUserNames(name),
-    packageService.listMaintainers(name),
-    packageService.listModulesByName(name),
-    packageService.listModuleTags(name),
-    downloadTotalService.getTotalByName(name),
+  var r = yield [utils.getDownloadTotal(name),
+                 packageService.listDependents(name),
+                 packageService.listStarUserNames(name),
+                 packageService.listMaintainers(name),
+                 packageService.listModulesByName(name),
+                 packageService.listModuleTags(name),
+                 downloadTotalService.getTotalByName(name),
   ];
   var download = r[0];
   var dependents = r[1];
@@ -96,7 +93,8 @@ module.exports = function* show(next) {
     if (typeof versionPkg === 'string') {
       continue;
     }
-    versionPkg.fromNow = moment(versionPkg.publish_time || row.publish_time).fromNow();
+    versionPkg.fromNow =
+        moment(versionPkg.publish_time || row.publish_time).fromNow();
     versions.push(versionPkg);
     versionsMap[versionPkg.version] = versionPkg;
   }
@@ -135,7 +133,8 @@ module.exports = function* show(next) {
     for (var i = 0; i < pkg.maintainers.length; i++) {
       var maintainer = pkg.maintainers[i];
       if (maintainer.email) {
-        maintainer.gravatar = gravatar.url(maintainer.email, {s: '50', d: 'retro'}, true);
+        maintainer.gravatar =
+            gravatar.url(maintainer.email, {s : '50', d : 'retro'}, true);
       }
     }
   }
@@ -143,7 +142,8 @@ module.exports = function* show(next) {
   if (pkg._npmUser) {
     pkg.lastPublishedUser = pkg._npmUser;
     if (pkg.lastPublishedUser.email) {
-      pkg.lastPublishedUser.gravatar = gravatar.url(pkg.lastPublishedUser.email, {s: '50', d: 'retro'}, true);
+      pkg.lastPublishedUser.gravatar = gravatar.url(
+          pkg.lastPublishedUser.email, {s : '50', d : 'retro'}, true);
     }
   }
 
@@ -152,7 +152,10 @@ module.exports = function* show(next) {
   }
   if (pkg.repository && pkg.repository.url) {
     if (!pkg.repository.weburl) {
-      pkg.repository.weburl = /^https?:\/\//.test(pkg.repository.url) ? pkg.repository.url : (giturl.parse(pkg.repository.url) || pkg.repository.url);
+      pkg.repository.weburl =
+          /^https?:\/\//.test(pkg.repository.url)
+              ? pkg.repository.url
+              : (giturl.parse(pkg.repository.url) || pkg.repository.url);
     }
   }
   if (!pkg.bugs) {
@@ -177,7 +180,8 @@ module.exports = function* show(next) {
   }
 
   pkg.registryUrl = '//' + config.registryHost + '/' + pkg.name;
-  pkg.registryPackageUrl = '//' + config.registryHost + '/' + pkg.name + '/' + pkg.version;
+  pkg.registryPackageUrl =
+      '//' + config.registryHost + '/' + pkg.name + '/' + pkg.version;
 
   // pkg.engines = {
   //   "python": ">= 0.11.9",
@@ -209,35 +213,38 @@ module.exports = function* show(next) {
       }
     }
     pkg.engines[k] = {
-      version: engine,
-      title: k + ': ' + engine,
-      badgeURL: config.badgeService.url(k, engine, { color }),
+      version : engine,
+      title : k + ': ' + engine,
+      badgeURL : config.badgeService.url(k, engine, {color}),
     };
   }
 
-  let packagephobiaSupport = downloadTotal >= config.packagephobiaMinDownloadCount;
+  let packagephobiaSupport =
+      downloadTotal >= config.packagephobiaMinDownloadCount;
   if (pkg._publish_on_cnpm) {
     pkg.isPrivate = true;
     // need download total >= 1000
-    packagephobiaSupport = downloadTotal >= config.packagephobiaMinDownloadCount && config.packagephobiaSupportPrivatePackage;
+    packagephobiaSupport =
+        downloadTotal >= config.packagephobiaMinDownloadCount &&
+        config.packagephobiaSupportPrivatePackage;
   } else {
     pkg.isPrivate = false;
     // add security check badge
     pkg.snyk = {
-      badge: `${config.snykUrl}/test/npm/${pkg.name}/badge.svg`,
-      url: `${config.snykUrl}/test/npm/${pkg.name}`,
+      badge : `${config.snykUrl}/test/npm/${pkg.name}/badge.svg`,
+      url : `${config.snykUrl}/test/npm/${pkg.name}`,
     };
   }
   if (packagephobiaSupport) {
     pkg.packagephobia = {
-      badge: `${config.packagephobiaURL}/badge?p=${pkg.name}@${pkg.version}`,
-      url: `${config.packagephobiaURL}/result?p=${pkg.name}@${pkg.version}`,
+      badge : `${config.packagephobiaURL}/badge?p=${pkg.name}@${pkg.version}`,
+      url : `${config.packagephobiaURL}/result?p=${pkg.name}@${pkg.version}`,
     };
   }
 
   yield this.render('package', {
-    title: 'Package - ' + pkg.name,
-    package: pkg,
-    download: download,
+    title : 'Package - ' + pkg.name,
+    package : pkg,
+    download : download,
   });
 };

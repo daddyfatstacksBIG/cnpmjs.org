@@ -23,29 +23,29 @@ var maxrequests = require('koa-maxrequests');
 if (config.enableNpmAuditsProxy) {
   var proxy = require('koa-proxy');
   app.use(proxy({
-    host:  'https://registry.npmjs.org',
-    match: /^\/\-\/npm\/v1\/security\/audits/
+    host : 'https://registry.npmjs.org',
+    match : /^\/\-\/npm\/v1\/security\/audits/
   }));
 }
 
 app.use(maxrequests());
 app.use(block());
 middlewares.jsonp(app);
-app.use(rt({ headerName: 'X-ReadTime' }));
+app.use(rt({headerName : 'X-ReadTime'}));
 app.use(rewrite('/favicon.ico', '/favicon.png'));
 app.use(staticCache);
 
-app.keys = ['todokey', config.sessionSecret];
+app.keys = [ 'todokey', config.sessionSecret ];
 app.proxy = true;
-app.use(bodyParser({ jsonLimit: config.jsonLimit, strict: false }));
+app.use(bodyParser({jsonLimit : config.jsonLimit, strict : false}));
 app.use(cors({
-  allowMethods: 'GET,HEAD',
+  allowMethods : 'GET,HEAD',
 }));
 app.use(auth());
 app.use(proxyToNpm());
 
 if (config.enableCompress) {
-  app.use(middlewares.compress({ threshold: 150 }));
+  app.use(middlewares.compress({threshold : 150}));
 }
 app.use(notFound);
 
@@ -67,7 +67,7 @@ routes(app);
  * Error handler
  */
 
-app.on('error', function (err, ctx) {
+app.on('error', function(err, ctx) {
   console.log(err);
   console.log(err.stack);
   err.url = err.url || ctx.request.url;
