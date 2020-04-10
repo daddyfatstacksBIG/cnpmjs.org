@@ -1,50 +1,57 @@
-'use strict';
+"use strict";
 
-var debug = require('debug')('cnpmjs.org:sync_module_worker');
-var co = require('co');
-var gather = require('co-gather');
-var defer = require('co-defer');
-var thunkify = require('thunkify-wrap');
-var EventEmitter = require('events').EventEmitter;
-var util = require('util');
-var fs = require('fs');
-var path = require('path');
-var crypto = require('crypto');
-var sleep = require('co-sleep');
-var utility = require('utility');
-var urlparse = require('url').parse;
-var urllib = require('../common/urllib');
-var config = require('../config');
-var nfs = require('../common/nfs');
-var logger = require('../common/logger');
-var common = require('../lib/common');
-var npmSerivce = require('../services/npm');
-var packageService = require('../services/package');
-var logService = require('../services/module_log');
-var downloadTotalService = require('../services/download_total');
-var hook = require('../services/hook');
-var User = require('../models').User;
-var os = require('os');
-const cache = require('../common/cache');
+var debug = require("debug")("cnpmjs.org:sync_module_worker");
+var co = require("co");
+var gather = require("co-gather");
+var defer = require("co-defer");
+var thunkify = require("thunkify-wrap");
+var EventEmitter = require("events").EventEmitter;
+var util = require("util");
+var fs = require("fs");
+var path = require("path");
+var crypto = require("crypto");
+var sleep = require("co-sleep");
+var utility = require("utility");
+var urlparse = require("url").parse;
+var urllib = require("../common/urllib");
+var config = require("../config");
+var nfs = require("../common/nfs");
+var logger = require("../common/logger");
+var common = require("../lib/common");
+var npmSerivce = require("../services/npm");
+var packageService = require("../services/package");
+var logService = require("../services/module_log");
+var downloadTotalService = require("../services/download_total");
+var hook = require("../services/hook");
+var User = require("../models").User;
+var os = require("os");
+const cache = require("../common/cache");
 
-var USER_AGENT = 'sync.cnpmjs.org/' + config.version +
-  ' hostname/' + os.hostname() +
-  ' syncModel/' + config.syncModel +
-  ' syncInterval/' + config.syncInterval +
-  ' syncConcurrency/' + config.syncConcurrency +
-  ' ' + urllib.USER_AGENT;
+var USER_AGENT =
+  "sync.cnpmjs.org/" +
+  config.version +
+  " hostname/" +
+  os.hostname() +
+  " syncModel/" +
+  config.syncModel +
+  " syncInterval/" +
+  config.syncInterval +
+  " syncConcurrency/" +
+  config.syncConcurrency +
+  " " +
+  urllib.USER_AGENT;
 
 function SyncModuleWorker(options) {
   EventEmitter.call(this);
   this._logId = options.logId;
-  this._log = '';
+  this._log = "";
   this._loging = false;
   this._isEnd = false;
   if (!Array.isArray(options.name)) {
     options.name = [options.name];
   }
 
-  this.type = options.type || 'package';
+  this.type = options.type || "package";
   this.names = options.name;
   this.startName = this.names[0];
 
@@ -55,9 +62,11 @@ function SyncModuleWorker(options) {
 
   this.syncingNames = {};
   this.nameMap = {};
-  this.names.forEach(function (name) {
-    this.nameMap[name] = true;
-  }.bind(this));
+  this.names.forEach(
+    function(name) {
+      this.nameMap[name] = true;
+    }.bind(this)
+  );
   this.noDep = options.noDep === true; // do not sync dependences
   this.syncDevDependencies = config.syncDevDependencies;
 
@@ -70,33 +79,38 @@ util.inherits(SyncModuleWorker, EventEmitter);
 
 module.exports = SyncModuleWorker;
 
-SyncModuleWorker.prototype.finish = function () {
-  debug('syncingNames: %j', this.syncingNames);
+SyncModuleWorker.prototype.finish = function() {
+  debug("syncingNames: %j", this.syncingNames);
   if (this._finished || Object.keys(this.syncingNames).length > 0) {
     return;
   }
   this._finished = true;
-  this.log('[done] Sync %s %s finished, %d success, %d fail\nSuccess: [ %s ]\nFail: [ %s ]',
+  this.log(
+    "[done] Sync %s %s finished, %d success, %d fail\nSuccess: [ %s ]\nFail: [ %s ]",
     this.startName,
     this.type,
-    this.successes.length, this.fails.length,
-    this.successes.join(', '), this.fails.join(', '));
+    this.successes.length,
+    this.fails.length,
+    this.successes.join(", "),
+    this.fails.join(", ")
+  );
   this._saveLog();
   this._isEnd = true;
-  this.emit('end');
+  this.emit("end");
   // make sure all event listeners release
   this.removeAllListeners();
 };
 
 var MAX_LEN = 10 * 1024;
 // log(format, arg1, arg2, ...)
-SyncModuleWorker.prototype.log = function () {
-  var str = '[' + utility.YYYYMMDDHHmmss() + '] ' + util.format.apply(util, arguments);
+SyncModuleWorker.prototype.log = function() {
+  var str =
+    "[" + utility.YYYYMMDDHHmmss() + "] " + util.format.apply(util, arguments);
   debug(str);
   var logId = this._logId;
   if (logId) {
     if (this._log) {
-      this._log += '\n';
+      this._log += "\n";
     }
     this._log += str;
     if (this._log.length >= MAX_LEN) {
@@ -105,42 +119,55 @@ SyncModuleWorker.prototype.log = function () {
   }
 };
 
-SyncModuleWorker.prototype._saveLog = function () {
+SyncModuleWorker.prototype._saveLog = function() {
   var that = this;
   if (that._loging) {
     return;
   }
   that._loging = true;
   var logstr = that._log;
-  that._log = '';
+  that._log = "";
 
   if (!logstr) {
     that._loging = false;
     return;
   }
 
-  co(function* () {
+  co(function*() {
     yield logService.append(that._logId, logstr);
-  }).then(function () {
-    that._loging = false;
-    if (that._log) {
-      that._saveLog();
-    }
-  }).catch(function (err) {
-    that._loging = false;
-    logger.error(err);
-    // ignore the unsave log
-    if (this._isEnd) {
-      logger.error('[SyncModuleWorker] skip to save %s logstr: %s', that._logId, logstr);
-    }
-  });
+  })
+    .then(function() {
+      that._loging = false;
+      if (that._log) {
+        that._saveLog();
+      }
+    })
+    .catch(function(err) {
+      that._loging = false;
+      logger.error(err);
+      // ignore the unsave log
+      if (this._isEnd) {
+        logger.error(
+          "[SyncModuleWorker] skip to save %s logstr: %s",
+          that._logId,
+          logstr
+        );
+      }
+    });
 };
 
-SyncModuleWorker.prototype.start = function () {
+SyncModuleWorker.prototype.start = function() {
   var that = this;
-  that.log('user: %s, sync %s worker start, %d concurrency, nodeps: %s, publish: %s, syncUpstreamFirst: %s',
-    that.username, that.names[0], that.concurrency, that.noDep, that._publish, that.syncUpstreamFirst);
-  co(function* () {
+  that.log(
+    "user: %s, sync %s worker start, %d concurrency, nodeps: %s, publish: %s, syncUpstreamFirst: %s",
+    that.username,
+    that.names[0],
+    that.concurrency,
+    that.noDep,
+    that._publish,
+    that.syncUpstreamFirst
+  );
+  co(function*() {
     // sync upstream
     if (that.syncUpstreamFirst) {
       try {
@@ -151,7 +178,7 @@ SyncModuleWorker.prototype.start = function () {
       }
     }
 
-    if (that.type === 'user') {
+    if (that.type === "user") {
       yield that.syncUser();
       that._saveLog();
       that._isEnd = true;
@@ -164,33 +191,33 @@ SyncModuleWorker.prototype.start = function () {
     }
     yield arr;
     that._saveLog();
-  }).catch(function (err) {
+  }).catch(function(err) {
     logger.error(err);
     that._saveLog();
   });
 };
 
-SyncModuleWorker.prototype.pushSuccess = function (name) {
+SyncModuleWorker.prototype.pushSuccess = function(name) {
   this.successes.push(name);
-  this.emit('success', name);
+  this.emit("success", name);
 };
 
-SyncModuleWorker.prototype.pushFail = function (name) {
+SyncModuleWorker.prototype.pushFail = function(name) {
   this.fails.push(name);
-  this.emit('fail', name);
+  this.emit("fail", name);
 };
 
-SyncModuleWorker.prototype.add = function (name) {
+SyncModuleWorker.prototype.add = function(name) {
   if (this.nameMap[name]) {
     return;
   }
   this.nameMap[name] = true;
   this.names.push(name);
-  this.emit('add', name);
-  this.log('    add dependencies: %s', name);
+  this.emit("add", name);
+  this.log("    add dependencies: %s", name);
 };
 
-SyncModuleWorker.prototype._doneOne = function* (concurrencyId, name, success) {
+SyncModuleWorker.prototype._doneOne = function*(concurrencyId, name, success) {
   // clean cache
   if (cache) {
     const cacheKey = `list-${name}-v1`;
@@ -199,8 +226,11 @@ SyncModuleWorker.prototype._doneOne = function* (concurrencyId, name, success) {
     });
   }
 
-  this.log('----------------- Synced %s %s -------------------',
-    name, success ? 'success' : 'fail');
+  this.log(
+    "----------------- Synced %s %s -------------------",
+    name,
+    success ? "success" : "fail"
+  );
   if (success) {
     this.pushSuccess(name);
   } else {
@@ -209,65 +239,77 @@ SyncModuleWorker.prototype._doneOne = function* (concurrencyId, name, success) {
   delete this.syncingNames[name];
   var that = this;
   // relase the stack: https://github.com/cnpm/cnpmjs.org/issues/328
-  defer.setImmediate(function* () {
+  defer.setImmediate(function*() {
     yield that.next(concurrencyId);
   });
 };
 
-SyncModuleWorker.prototype.syncUpstream = function* (name) {
-  if (config.sourceNpmRegistry.indexOf('registry.npmjs.org') >= 0 ||
-      config.sourceNpmRegistry.indexOf('registry.npmjs.com') >= 0 ||
-      config.sourceNpmRegistry.indexOf('replicate.npmjs.com') >= 0) {
-    this.log('----------------- upstream is npm registry: %s, ignore it -------------------',
-      config.sourceNpmRegistry);
+SyncModuleWorker.prototype.syncUpstream = function*(name) {
+  if (
+    config.sourceNpmRegistry.indexOf("registry.npmjs.org") >= 0 ||
+    config.sourceNpmRegistry.indexOf("registry.npmjs.com") >= 0 ||
+    config.sourceNpmRegistry.indexOf("replicate.npmjs.com") >= 0
+  ) {
+    this.log(
+      "----------------- upstream is npm registry: %s, ignore it -------------------",
+      config.sourceNpmRegistry
+    );
     return;
   }
   var syncname = name;
-  if (this.type === 'user') {
-    syncname = this.type + ':' + syncname;
+  if (this.type === "user") {
+    syncname = this.type + ":" + syncname;
   }
-  var url = config.sourceNpmRegistry + '/' + syncname + '/sync?sync_upstream=true';
+  var url =
+    config.sourceNpmRegistry + "/" + syncname + "/sync?sync_upstream=true";
   if (this.noDep) {
-    url += '&nodeps=true';
+    url += "&nodeps=true";
   }
   var r = yield urllib.request(url, {
-    method: 'put',
+    method: "put",
     timeout: 20000,
-    headers: {
-      'content-length': 0
-    },
-    dataType: 'json',
-    gzip: true,
+    headers: { "content-length": 0 },
+    dataType: "json",
+    gzip: true
   });
 
   if (r.status !== 201 || !r.data.ok) {
-    return this.log('sync upstream %s error, status: %s, response: %j',
-      url, r.status, r.data);
+    return this.log(
+      "sync upstream %s error, status: %s, response: %j",
+      url,
+      r.status,
+      r.data
+    );
   }
 
-  var logURL = config.sourceNpmRegistry + '/' + name + '/sync/log/' + r.data.logId;
+  var logURL =
+    config.sourceNpmRegistry + "/" + name + "/sync/log/" + r.data.logId;
   var offset = 0;
-  this.log('----------------- Syncing upstream %s -------------------', logURL);
+  this.log("----------------- Syncing upstream %s -------------------", logURL);
 
   var count = 0;
   while (true) {
     count++;
-    var synclogURL = logURL + '?offset=' + offset;
+    var synclogURL = logURL + "?offset=" + offset;
     var rs = yield urllib.request(synclogURL, {
       timeout: 20000,
-      dataType: 'json',
-      gzip: true,
+      dataType: "json",
+      gzip: true
     });
 
     if (rs.status !== 200 || !rs.data.ok) {
-      this.log('sync upstream %s error, status: %s, response: %j',
-        synclogURL, rs.status, rs.data);
+      this.log(
+        "sync upstream %s error, status: %s, response: %j",
+        synclogURL,
+        rs.status,
+        rs.data
+      );
       break;
     }
 
     var data = rs.data;
     if (data.log) {
-      data.log = data.log.replace('[done] Sync', '[Upstream done] Sync');
+      data.log = data.log.replace("[done] Sync", "[Upstream done] Sync");
       this.log(data.log);
     }
 
@@ -276,71 +318,84 @@ SyncModuleWorker.prototype.syncUpstream = function* (name) {
     }
 
     if (count >= 30) {
-      this.log('sync upstream %s fail, give up', logURL);
+      this.log("sync upstream %s fail, give up", logURL);
       break;
     }
 
     if (data.log) {
-      offset += data.log.split('\n').length;
+      offset += data.log.split("\n").length;
     }
 
     yield sleep(2000);
   }
-  this.log('----------------- Synced upstream %s -------------------', logURL);
+  this.log("----------------- Synced upstream %s -------------------", logURL);
 };
 
-SyncModuleWorker.prototype.syncUser = function* () {
+SyncModuleWorker.prototype.syncUser = function*() {
   for (var i = 0; i < this.names.length; i++) {
     var username = this.names[i];
     try {
       var user = yield _saveNpmUser(username);
       this.pushSuccess(username);
-      this.log('[c#%s] [%s] sync success: %j', 0, username, user);
+      this.log("[c#%s] [%s] sync success: %j", 0, username, user);
     } catch (err) {
       this.pushFail(username);
-      this.log('[c#%s] [error] [%s] sync error: %s', 0, username, err.stack);
+      this.log("[c#%s] [error] [%s] sync error: %s", 0, username, err.stack);
     }
   }
   this.finish();
 };
 
-SyncModuleWorker.prototype.next = function* (concurrencyId) {
+SyncModuleWorker.prototype.next = function*(concurrencyId) {
   var name = this.names.shift();
   if (!name) {
     return setImmediate(this.finish.bind(this));
   }
 
-  if (config.syncModel === 'none') {
-    this.log('[c#%d] [%s] syncModel is none, ignore',
-      concurrencyId, name);
+  if (config.syncModel === "none") {
+    this.log("[c#%d] [%s] syncModel is none, ignore", concurrencyId, name);
     return this.finish();
   }
 
-  // try to sync from official replicate when source npm registry is not cnpmjs.org
-  const registry = config.sourceNpmRegistryIsCNpm ? config.sourceNpmRegistry : config.officialNpmReplicate;
+  // try to sync from official replicate when source npm registry is not
+  // cnpmjs.org
+  const registry = config.sourceNpmRegistryIsCNpm
+    ? config.sourceNpmRegistry
+    : config.officialNpmReplicate;
 
   yield this.syncByName(concurrencyId, name, registry);
 };
 
-SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry) {
+SyncModuleWorker.prototype.syncByName = function*(
+  concurrencyId,
+  name,
+  registry,
+  retryCount
+) {
+  retryCount = retryCount || 0;
   var that = this;
   that.syncingNames[name] = true;
   var pkg = null;
   var status = 0;
 
-  this.log('----------------- Syncing %s -------------------', name);
+  this.log("----------------- Syncing %s -------------------", name);
 
   // ignore private scoped package
   if (common.isPrivateScopedPackage(name)) {
-    this.log('[c#%d] [%s] ignore sync private scoped %j package',
-      concurrencyId, name, config.scopes);
+    this.log(
+      "[c#%d] [%s] ignore sync private scoped %j package",
+      concurrencyId,
+      name,
+      config.scopes
+    );
     yield this._doneOne(concurrencyId, name, true);
     return;
   }
 
   let realRegistry = registry;
   // get from npm, don't cache
-  const packageUrl = '/' + name.replace('/', '%2f') + '?sync_timestamp=' + Date.now();
+  const packageUrl =
+    "/" + name.replace("/", "%2f") + "?sync_timestamp=" + Date.now();
   try {
     var result = yield npmSerivce.request(packageUrl, { registry: registry });
     pkg = result.data;
@@ -348,51 +403,112 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
     // read from officialNpmRegistry and use the latest modified package info
     if (registry === config.officialNpmReplicate) {
       try {
-        const officialResult = yield npmSerivce.request(packageUrl, { registry: config.officialNpmRegistry });
+        const officialResult = yield npmSerivce.request(packageUrl, {
+          registry: config.officialNpmRegistry
+        });
         const officialPkg = officialResult.data;
         const officialStatus = officialResult.status;
-        this.log('[c#%d] [%s] official registry(%j, %j), replicate(%j, %j), packageUrl: %s',
-          concurrencyId, name,
-          officialPkg['dist-tags'], officialPkg.time && officialPkg.time.modified,
-          pkg['dist-tags'], pkg.time && pkg.time.modified, packageUrl);
+        this.log(
+          "[c#%d] [%s] official registry(%j, %j), replicate(%j, %j), packageUrl: %s",
+          concurrencyId,
+          name,
+          officialPkg["dist-tags"],
+          officialPkg.time && officialPkg.time.modified,
+          pkg["dist-tags"],
+          pkg.time && pkg.time.modified,
+          packageUrl
+        );
         if (officialPkg.time) {
           if (!pkg.time || officialPkg.time.modified > pkg.time.modified) {
-            this.log('[c#%d] [%s] use official registry\'s data instead of replicate, modified: %j < %j',
-              concurrencyId, name, pkg.time && pkg.time.modified, officialPkg.time.modified);
+            this.log(
+              "[c#%d] [%s] use official registry's data instead of replicate, modified: %j < %j",
+              concurrencyId,
+              name,
+              pkg.time && pkg.time.modified,
+              officialPkg.time.modified
+            );
             pkg = officialPkg;
             status = officialStatus;
             realRegistry = config.officialNpmRegistry;
           }
         }
       } catch (err) {
-        that.log('[c#%s] [error] [%s] get package(%s%s) error: %s',
-          concurrencyId, name, config.officialNpmReplicate, packageUrl, err);
+        that.log(
+          "[c#%s] [error] [%s] get package(%s%s) error: %s",
+          concurrencyId,
+          name,
+          config.officialNpmReplicate,
+          packageUrl,
+          err
+        );
       }
     }
   } catch (err) {
     // if 404
     if (!err.res || err.res.statusCode !== 404) {
-      var errMessage = err.name + ': ' + err.message;
-      that.log('[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s',
-        concurrencyId, name, registry, packageUrl, errMessage, status);
-      // replicate request error, try to request from official registry
-      if (registry !== config.officialNpmReplicate) {
+      var errMessage = err.name + ": " + err.message;
+      that.log(
+        "[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s, retryCount: %s",
+        concurrencyId,
+        name,
+        registry,
+        packageUrl,
+        errMessage,
+        status,
+        retryCount
+      );
+
+      // retry from cnpmRegistry again, max 3 times
+      if (registry === config.cnpmRegistry && retryCount < 3) {
+        this.log(
+          "[c#%d] [%s] retry from %s after 3s, retryCount: %s",
+          concurrencyId,
+          name,
+          registry,
+          retryCount
+        );
+        yield sleep(3000);
+        yield that.syncByName(concurrencyId, name, registry, retryCount + 1);
+        return;
+      }
+
+      // replicate/cnpmRegistry request error, try to request from official
+      // registry
+      if (
+        registry !== config.officialNpmReplicate &&
+        registry !== config.cnpmRegistry
+      ) {
         // sync fail
         yield that._doneOne(concurrencyId, name, false);
         return;
       }
 
       // retry from officialNpmRegistry when officialNpmReplicate fail
-      this.log('[c#%d] [%s] retry from %s', concurrencyId, name, config.officialNpmRegistry);
+      this.log(
+        "[c#%d] [%s] retry from %s, retryCount: %s",
+        concurrencyId,
+        name,
+        config.officialNpmRegistry,
+        retryCount
+      );
       try {
-        var result = yield npmSerivce.request(packageUrl, { registry: config.officialNpmRegistry });
+        var result = yield npmSerivce.request(packageUrl, {
+          registry: config.officialNpmRegistry
+        });
         pkg = result.data;
         status = result.status;
         realRegistry = config.officialNpmRegistry;
       } catch (err) {
-        var errMessage = err.name + ': ' + err.message;
-        that.log('[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s',
-          concurrencyId, name, config.officialNpmRegistry, packageUrl, errMessage, status);
+        var errMessage = err.name + ": " + err.message;
+        that.log(
+          "[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s",
+          concurrencyId,
+          name,
+          config.officialNpmRegistry,
+          packageUrl,
+          errMessage,
+          status
+        );
         // sync fail
         yield that._doneOne(concurrencyId, name, false);
         return;
@@ -400,7 +516,12 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
     }
   }
 
-  if (status === 404 && pkg && pkg.reason && registry === config.officialNpmReplicate) {
+  if (
+    status === 404 &&
+    pkg &&
+    pkg.reason &&
+    registry === config.officialNpmReplicate
+  ) {
     // unpublished package on replicate.npmjs.com
     // 404 { error: 'not_found', reason: 'deleted' }
     // try to read from registry.npmjs.com and get the whole unpublished info
@@ -409,16 +530,25 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
     // {"error":"not_found","reason":"no_db_file"}
     // try to read from registry.npmjs.com and get no_db_file
     try {
-      var result = yield npmSerivce.request(packageUrl, { registry: config.sourceNpmRegistry });
+      var result = yield npmSerivce.request(packageUrl, {
+        registry: config.sourceNpmRegistry
+      });
       pkg = result.data;
       status = result.status;
       realRegistry = config.sourceNpmRegistry;
     } catch (err) {
       // if 404
       if (!err.res || err.res.statusCode !== 404) {
-        var errMessage = err.name + ': ' + err.message;
-        that.log('[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s',
-          concurrencyId, name, config.sourceNpmRegistry, packageUrl, errMessage, status);
+        var errMessage = err.name + ": " + err.message;
+        that.log(
+          "[c#%s] [error] [%s] get package(%s%s) error: %s, status: %s",
+          concurrencyId,
+          name,
+          config.sourceNpmRegistry,
+          packageUrl,
+          errMessage,
+          status
+        );
         yield that._doneOne(concurrencyId, name, false);
         return;
       }
@@ -428,37 +558,68 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
   var unpublishedInfo = null;
   if (status === 404) {
     // check if it's unpublished
-    // ignore too long package name, see https://github.com/cnpm/cnpmjs.org/issues/1066
-    if (name.length < 80 && pkg && pkg.time && pkg.time.unpublished && pkg.time.unpublished.time) {
+    // ignore too long package name, see
+    // https://github.com/cnpm/cnpmjs.org/issues/1066
+    if (
+      name.length < 80 &&
+      pkg &&
+      pkg.time &&
+      pkg.time.unpublished &&
+      pkg.time.unpublished.time
+    ) {
       unpublishedInfo = pkg.time.unpublished;
     } else {
       pkg = null;
     }
   } else {
     // unpublished package status become to 200
-    if (name.length < 80 && pkg && pkg.time && pkg.time.unpublished && pkg.time.unpublished.time) {
+    if (
+      name.length < 80 &&
+      pkg &&
+      pkg.time &&
+      pkg.time.unpublished &&
+      pkg.time.unpublished.time
+    ) {
       unpublishedInfo = pkg.time.unpublished;
     }
   }
 
   if (!pkg) {
-    that.log('[c#%s] [error] [%s] get package(%s%s) error: package not exists, status: %s',
-      concurrencyId, name, realRegistry, packageUrl, status);
+    that.log(
+      "[c#%s] [error] [%s] get package(%s%s) error: package not exists, status: %s",
+      concurrencyId,
+      name,
+      realRegistry,
+      packageUrl,
+      status
+    );
     yield that._doneOne(concurrencyId, name, true);
     // return empty versions, try again on officialNpmRegistry
     return [];
   }
 
-  that.log('[c#%d] [%s] package(%s%s) status: %s, dist-tags: %j, time.modified: %s, unpublished: %j, start...',
-    concurrencyId, name, realRegistry, packageUrl, status,
-    pkg['dist-tags'], pkg.time && pkg.time.modified,
-    unpublishedInfo);
+  that.log(
+    "[c#%d] [%s] package(%s%s) status: %s, dist-tags: %j, time.modified: %s, unpublished: %j, start...",
+    concurrencyId,
+    name,
+    realRegistry,
+    packageUrl,
+    status,
+    pkg["dist-tags"],
+    pkg.time && pkg.time.modified,
+    unpublishedInfo
+  );
 
   if (unpublishedInfo) {
     try {
       yield that._unpublished(name, unpublishedInfo);
     } catch (err) {
-      that.log('[c#%s] [error] [%s] sync error: %s', concurrencyId, name, err.stack);
+      that.log(
+        "[c#%s] [error] [%s] sync error: %s",
+        concurrencyId,
+        name,
+        err.stack
+      );
       yield that._doneOne(concurrencyId, name, false);
       return;
     }
@@ -469,7 +630,12 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
   try {
     versions = yield that._sync(name, pkg);
   } catch (err) {
-    that.log('[c#%s] [error] [%s] sync error: %s', concurrencyId, name, err.stack);
+    that.log(
+      "[c#%s] [error] [%s] sync error: %s",
+      concurrencyId,
+      name,
+      err.stack
+    );
     yield that._doneOne(concurrencyId, name, false);
     return;
   }
@@ -479,8 +645,13 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
     that.updates.push(name);
   }
 
-  this.log('[c#%d] [%s] synced success, %d versions: %s',
-    concurrencyId, name, versions.length, versions.join(', '));
+  this.log(
+    "[c#%d] [%s] synced success, %d versions: %s",
+    concurrencyId,
+    name,
+    versions.length,
+    versions.join(", ")
+  );
   yield this._doneOne(concurrencyId, name, true);
 
   return versions;
@@ -489,7 +660,7 @@ SyncModuleWorker.prototype.syncByName = function* (concurrencyId, name, registry
 function* _listStarUsers(modName) {
   var users = yield packageService.listStarUserNames(modName);
   var userMap = {};
-  users.forEach(function (user) {
+  users.forEach(function(user) {
     userMap[user] = true;
   });
   return userMap;
@@ -503,7 +674,7 @@ function* _saveNpmUser(username) {
       // delete it
       yield User.destroy({
         where: {
-          name: username,
+          name: username
         }
       });
       return { exists: true, deleted: true, isNpmUser: true };
@@ -515,40 +686,55 @@ function* _saveNpmUser(username) {
 }
 
 function* _saveMaintainer(modName, username, action) {
-  if (action === 'add') {
+  if (action === "add") {
     yield packageService.addPublicModuleMaintainer(modName, username);
-  } else if (action === 'remove') {
+  } else if (action === "remove") {
     yield packageService.removePublicModuleMaintainer(modName, username);
   }
 }
 
-SyncModuleWorker.prototype._unpublished = function* (name, unpublishedInfo) {
+SyncModuleWorker.prototype._unpublished = function*(name, unpublishedInfo) {
   var mods = yield packageService.listModulesByName(name);
-  this.log('  [%s] start unpublished %d versions from local cnpm registry',
-    name, mods.length);
+  this.log(
+    "  [%s] start unpublished %d versions from local cnpm registry",
+    name,
+    mods.length
+  );
   if (common.isLocalModule(mods)) {
     // publish on cnpm, dont sync this version package
-    this.log('  [%s] publish on local cnpm registry, don\'t sync', name);
+    this.log("  [%s] publish on local cnpm registry, don't sync", name);
     return [];
   }
   if (!config.syncDeletedVersions) {
     const downloadCount = yield downloadTotalService.getTotalByName(name);
     if (downloadCount >= 10000) {
-      this.log('  [%s] total downloads %s >= 10000 and `config.syncDeletedVersions=false`, don\'t sync unpublished info', name, downloadCount);
+      this.log(
+        "  [%s] total downloads %s >= 10000 and `config.syncDeletedVersions=false`, don't sync unpublished info",
+        name,
+        downloadCount
+      );
       return [];
     }
-    this.log('  [%s] total downloads %s < 10000 and `config.syncDeletedVersions=false`, still need to sync unpublished info', name, downloadCount);
+    this.log(
+      "  [%s] total downloads %s < 10000 and `config.syncDeletedVersions=false`, still need to sync unpublished info",
+      name,
+      downloadCount
+    );
   }
 
   var r = yield packageService.saveUnpublishedModule(name, unpublishedInfo);
-  this.log('    [%s] save unpublished info: %j to row#%s',
-    name, unpublishedInfo, r.id);
+  this.log(
+    "    [%s] save unpublished info: %j to row#%s",
+    name,
+    unpublishedInfo,
+    r.id
+  );
   if (mods.length === 0) {
     return;
   }
   yield [
     packageService.removeModulesByName(name),
-    packageService.removeModuleTags(name),
+    packageService.removeModuleTags(name)
   ];
   var keys = [];
   for (var i = 0; i < mods.length; i++) {
@@ -563,19 +749,24 @@ SyncModuleWorker.prototype._unpublished = function* (name, unpublishedInfo) {
 
   if (keys.length > 0) {
     try {
-      yield keys.map(function (key) {
+      yield keys.map(function(key) {
         return nfs.remove(key);
       });
     } catch (err) {
       // ignore error here
-      this.log('    [%s] delete nfs files: %j error: %s: %s',
-        name, keys, err.name, err.message);
+      this.log(
+        "    [%s] delete nfs files: %j error: %s: %s",
+        name,
+        keys,
+        err.name,
+        err.message
+      );
     }
   }
-  this.log('    [%s] delete nfs files: %j success', name, keys);
+  this.log("    [%s] delete nfs files: %j success", name, keys);
 };
 
-SyncModuleWorker.prototype._sync = function* (name, pkg) {
+SyncModuleWorker.prototype._sync = function*(name, pkg) {
   var that = this;
   var hasModules = false;
   var result = yield [
@@ -583,7 +774,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     packageService.listModuleTags(name),
     _listStarUsers(name),
     packageService.listPublicModuleMaintainers(name),
-    packageService.listModuleAbbreviatedsByName(name),
+    packageService.listModuleAbbreviatedsByName(name)
   ];
   var moduleRows = result[0];
   var tagRows = result[1];
@@ -593,7 +784,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
 
   if (common.isLocalModule(moduleRows)) {
     // publish on cnpm, dont sync this version package
-    that.log('  [%s] publish on local cnpm registry, don\'t sync', name);
+    that.log("  [%s] publish on local cnpm registry, don't sync", name);
     return [];
   }
 
@@ -621,8 +812,8 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   }
 
   var latestVersionPackageReadme = {
-    version: pkg['dist-tags'].latest,
-    readme: pkg.readme,
+    version: pkg["dist-tags"].latest,
+    readme: pkg.readme
   };
 
   var tags = {};
@@ -639,28 +830,36 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   var remoteAbbreviatedMetadatas = {};
   if (config.enableAbbreviatedMetadata) {
     // use ?cache=0 tell registry dont use cache result
-    var packageUrl = '/' + name.replace('/', '%2f') + '?cache=0&sync_timestamp=' + Date.now();
+    var packageUrl =
+      "/" + name.replace("/", "%2f") + "?cache=0&sync_timestamp=" + Date.now();
     var result = yield npmSerivce.request(packageUrl, {
-      dataType: 'text',
+      dataType: "text",
       registry: config.sourceNpmRegistry,
       headers: {
-        Accept: 'application/vnd.npm.install-v1+json',
-      },
+        Accept: "application/vnd.npm.install-v1+json"
+      }
     });
     if (result.status === 200) {
       var data;
       try {
         data = JSON.parse(result.data);
       } catch (err) {
-        that.log('  [%s] get abbreviated meta error: %s, headers: %j, %j',
-          name, err, result.headers, result.data);
+        that.log(
+          "  [%s] get abbreviated meta error: %s, headers: %j, %j",
+          name,
+          err,
+          result.headers,
+          result.data
+        );
       }
       if (data) {
-        var versions = data && data.versions || {};
+        var versions = (data && data.versions) || {};
         for (var version in versions) {
           const item = versions[version];
-          if (item && typeof item._hasShrinkwrap === 'boolean') {
-            remoteAbbreviatedMetadatas[version] = { _hasShrinkwrap: item._hasShrinkwrap };
+          if (item && typeof item._hasShrinkwrap === "boolean") {
+            remoteAbbreviatedMetadatas[version] = {
+              _hasShrinkwrap: item._hasShrinkwrap
+            };
           }
         }
       }
@@ -707,7 +906,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     for (var i = 0; i < pkgMaintainers.length; i++) {
       var item = pkgMaintainers[i];
       if (!existsMap[item.name]) {
-        diffNpmMaintainers.push([item.name, 'add']);
+        diffNpmMaintainers.push([item.name, "add"]);
       }
     }
 
@@ -715,7 +914,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     for (var i = 0; i < existsNpmMaintainers.length; i++) {
       var user = existsNpmMaintainers[i];
       if (!originalMap[user]) {
-        diffNpmMaintainers.push([user, 'remove']);
+        diffNpmMaintainers.push([user, "remove"]);
       }
     }
   }
@@ -745,7 +944,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     }
     npmUsernames[k.toLowerCase()] = 1;
   }
-  that.log('  [%s] found %d missing star users', name, missingStarUsers.length);
+  that.log("  [%s] found %d missing star users", name, missingStarUsers.length);
 
   var times = pkg.time || {};
   pkg.versions = pkg.versions || {};
@@ -780,31 +979,41 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     var abbreviatedMetadata = remoteAbbreviatedMetadatas[version.version];
 
     if (exists.package && exists.package.dist.shasum === version.dist.shasum) {
-      var existsModuleAbbreviated = existsModuleAbbreviatedsMap[exists.package.version];
+      var existsModuleAbbreviated =
+        existsModuleAbbreviatedsMap[exists.package.version];
       if (!existsModuleAbbreviated) {
         missingModuleAbbreviateds.push(exists);
       } else {
         // sync missing deprecated on existsModuleAbbreviated
-        if (exists.package.deprecated && exists.package.deprecated !== existsModuleAbbreviated.package.deprecated) {
+        if (
+          exists.package.deprecated &&
+          exists.package.deprecated !==
+            existsModuleAbbreviated.package.deprecated
+        ) {
           // add deprecated
           missingDeprecatedsOnExistsModuleAbbreviated.push({
             name,
             version: exists.package.version,
-            deprecated: exists.package.deprecated,
+            deprecated: exists.package.deprecated
           });
-        } else if (existsModuleAbbreviated.package.deprecated && !exists.package.deprecated) {
+        } else if (
+          existsModuleAbbreviated.package.deprecated &&
+          !exists.package.deprecated
+        ) {
           // remove deprecated
           missingDeprecatedsOnExistsModuleAbbreviated.push({
             name,
             version: exists.package.version,
-            deprecated: undefined,
+            deprecated: undefined
           });
         }
       }
 
       // * shasum make sure equal
-      if ((version.publish_time === exists.publish_time) ||
-          (!version.publish_time && exists.publish_time)) {
+      if (
+        version.publish_time === exists.publish_time ||
+        (!version.publish_time && exists.publish_time)
+      ) {
         // debug('  [%s] %s publish_time equal: %s, %s',
         //   name, version.version, version.publish_time, exists.publish_time);
         // * publish_time make sure equal
@@ -822,7 +1031,7 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
           if (exists.package.readme) {
             missingReadmes.push({
               id: exists.id,
-              readme: undefined,
+              readme: undefined
             });
           }
         } else {
@@ -830,17 +1039,20 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
             // * make sure readme exists
             missingReadmes.push({
               id: exists.id,
-              readme: version.readme,
+              readme: version.readme
             });
             changedVersions[v] = 1;
           }
         }
 
-        if (version.deprecated && version.deprecated !== exists.package.deprecated) {
+        if (
+          version.deprecated &&
+          version.deprecated !== exists.package.deprecated
+        ) {
           // need to sync deprecated field
           missingDeprecateds.push({
             id: exists.id,
-            deprecated: version.deprecated,
+            deprecated: version.deprecated
           });
           changedVersions[v] = 1;
         }
@@ -848,19 +1060,27 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
           // remove deprecated info
           missingDeprecateds.push({
             id: exists.id,
-            deprecated: undefined,
+            deprecated: undefined
           });
           changedVersions[v] = 1;
         }
         // find missing abbreviatedMetadata
         if (abbreviatedMetadata) {
           for (var key in abbreviatedMetadata) {
-            if (!(key in exists.package) || abbreviatedMetadata[key] !== exists.package[key]) {
-              missingAbbreviatedMetadatas.push(Object.assign({
-                id: exists.id,
-                name: exists.package.name,
-                version: exists.package.version,
-              }, abbreviatedMetadata));
+            if (
+              !(key in exists.package) ||
+              abbreviatedMetadata[key] !== exists.package[key]
+            ) {
+              missingAbbreviatedMetadatas.push(
+                Object.assign(
+                  {
+                    id: exists.id,
+                    name: exists.package.name,
+                    version: exists.package.version
+                  },
+                  abbreviatedMetadata
+                )
+              );
               break;
             }
           }
@@ -888,13 +1108,16 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   }
   // delete local abbreviatedMetadata data too
   for (var item of existsModuleAbbreviateds) {
-    if (!remoteVersionNameMap[item.version] && deletedVersionNames.indexOf(item.version) === -1) {
+    if (
+      !remoteVersionNameMap[item.version] &&
+      deletedVersionNames.indexOf(item.version) === -1
+    ) {
       deletedVersionNames.push(item.version);
     }
   }
 
   // find out missing tags
-  var sourceTags = pkg['dist-tags'] || {};
+  var sourceTags = pkg["dist-tags"] || {};
   for (var t in sourceTags) {
     var sourceTagVersion = sourceTags[t];
     if (sourceTagVersion && tags[t] !== sourceTagVersion) {
@@ -911,12 +1134,12 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   }
 
   if (missingVersions.length === 0) {
-    that.log('  [%s] all versions are exists', name);
+    that.log("  [%s] all versions are exists", name);
   } else {
-    missingVersions.sort(function (a, b) {
+    missingVersions.sort(function(a, b) {
       return a.publish_time - b.publish_time;
     });
-    that.log('  [%s] %d versions need to sync', name, missingVersions.length);
+    that.log("  [%s] %d versions need to sync", name, missingVersions.length);
   }
 
   var syncedVersionNames = [];
@@ -938,11 +1161,19 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
         break;
       } catch (err) {
         var delay = Date.now() - syncModule.publish_time;
-        that.log('    [%s:%d] tries: %d, delay: %s ms, sync error, version: %s, %s: %s',
-          syncModule.name, index, tries, delay, syncModule.version, err.name, err.stack);
+        that.log(
+          "    [%s:%d] tries: %d, delay: %s ms, sync error, version: %s, %s: %s",
+          syncModule.name,
+          index,
+          tries,
+          delay,
+          syncModule.version,
+          err.name,
+          err.stack
+        );
         var maxDelay = 3600000;
         if (tries-- > 0 && delay < maxDelay) {
-          that.log('    [%s:%d] retry after 30s', syncModule.name, index);
+          that.log("    [%s:%d] retry after 30s", syncModule.name, index);
           yield sleep(30000);
         } else {
           break;
@@ -952,15 +1183,22 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   }
 
   if (deletedVersionNames.length === 0) {
-    that.log('  [%s] no versions need to deleted', name);
+    that.log("  [%s] no versions need to deleted", name);
   } else {
     if (config.syncDeletedVersions) {
-      that.log('  [%s] %d versions: %j need to deleted, because config.syncDeletedVersions=true',
-        name, deletedVersionNames.length, deletedVersionNames);
+      that.log(
+        "  [%s] %d versions: %j need to deleted, because config.syncDeletedVersions=true",
+        name,
+        deletedVersionNames.length,
+        deletedVersionNames
+      );
       try {
-        yield packageService.removeModulesByNameAndVersions(name, deletedVersionNames);
+        yield packageService.removeModulesByNameAndVersions(
+          name,
+          deletedVersionNames
+        );
       } catch (err) {
-        that.log('    [%s] delete error, %s: %s', name, err.name, err.message);
+        that.log("    [%s] delete error, %s: %s", name, err.name, err.message);
       }
     } else {
       const downloadCount = yield downloadTotalService.getTotalByName(name);
@@ -980,23 +1218,52 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
           }
         }
         if (deletedIn24HoursVersions.length > 0) {
-          that.log('  [%s] %d versions: %j need to deleted, because they are deleted in 24 hours',
-            name, deletedIn24HoursVersions.length, deletedIn24HoursVersions);
+          that.log(
+            "  [%s] %d versions: %j need to deleted, because they are deleted in 24 hours",
+            name,
+            deletedIn24HoursVersions.length,
+            deletedIn24HoursVersions
+          );
           try {
-            yield packageService.removeModulesByNameAndVersions(name, deletedIn24HoursVersions);
+            yield packageService.removeModulesByNameAndVersions(
+              name,
+              deletedIn24HoursVersions
+            );
           } catch (err) {
-            that.log('    [%s] delete error, %s: %s', name, err.name, err.message);
+            that.log(
+              "    [%s] delete error, %s: %s",
+              name,
+              err.name,
+              err.message
+            );
           }
         }
-        that.log('  [%s] %d versions: %j no need to delete, because `config.syncDeletedVersions=false`',
-          name, oldVersions.length, oldVersions);
+        that.log(
+          "  [%s] %d versions: %j no need to delete, because `config.syncDeletedVersions=false`",
+          name,
+          oldVersions.length,
+          oldVersions
+        );
       } else {
-        that.log('  [%s] %d versions: %j need to deleted, because downloads %s < 10000',
-          name, deletedVersionNames.length, deletedVersionNames, downloadCount);
+        that.log(
+          "  [%s] %d versions: %j need to deleted, because downloads %s < 10000",
+          name,
+          deletedVersionNames.length,
+          deletedVersionNames,
+          downloadCount
+        );
         try {
-          yield packageService.removeModulesByNameAndVersions(name, deletedVersionNames);
+          yield packageService.removeModulesByNameAndVersions(
+            name,
+            deletedVersionNames
+          );
         } catch (err) {
-          that.log('    [%s] delete error, %s: %s', name, err.name, err.message);
+          that.log(
+            "    [%s] delete error, %s: %s",
+            name,
+            err.name,
+            err.message
+          );
         }
       }
     }
@@ -1007,20 +1274,32 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     if (missingDescriptions.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d descriptions', name, missingDescriptions.length);
-    var res = yield gather(missingDescriptions.map(function (item) {
-      return packageService.updateModuleDescription(item.id, item.description);
-    }));
+    that.log("  [%s] saving %d descriptions", name, missingDescriptions.length);
+    var res = yield gather(
+      missingDescriptions.map(function(item) {
+        return packageService.updateModuleDescription(
+          item.id,
+          item.description
+        );
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingDescriptions[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, id: %s, description: %s, error: %s',
-          item.id, item.description, r.error.message);
+        that.log(
+          "    save error, id: %s, description: %s, error: %s",
+          item.id,
+          item.description,
+          r.error.message
+        );
       } else {
-        that.log('    saved, id: %s, description length: %d',
-          item.id, item.description.length);
+        that.log(
+          "    saved, id: %s, description length: %d",
+          item.id,
+          item.description.length
+        );
       }
     }
   }
@@ -1029,28 +1308,42 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   function* syncTag() {
     if (deletedTags.length > 0) {
       yield packageService.removeModuleTagsByNames(name, deletedTags);
-      that.log('  [%s] deleted %d tags: %j',
-        name, deletedTags.length, deletedTags);
+      that.log(
+        "  [%s] deleted %d tags: %j",
+        name,
+        deletedTags.length,
+        deletedTags
+      );
     }
 
     if (missingTags.length === 0) {
       return;
     }
-    that.log('  [%s] adding %d tags', name, missingTags.length);
+    that.log("  [%s] adding %d tags", name, missingTags.length);
     // sync tags
-    var res = yield gather(missingTags.map(function (item) {
-      return packageService.addModuleTag(name, item[0], item[1]);
-    }));
+    var res = yield gather(
+      missingTags.map(function(item) {
+        return packageService.addModuleTag(name, item[0], item[1]);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingTags[i];
       var r = res[i];
       if (r.error) {
-        that.log('    add tag %s:%s error, error: %s',
-          item.id, item.description, r.error.message);
+        that.log(
+          "    add tag %s:%s error, error: %s",
+          item.id,
+          item.description,
+          r.error.message
+        );
       } else {
-        that.log('    added tag %s:%s, module_id: %s',
-          item[0], item[1], r.value && r.value.module_id);
+        that.log(
+          "    added tag %s:%s, module_id: %s",
+          item[0],
+          item[1],
+          r.value && r.value.module_id
+        );
       }
     }
   }
@@ -1060,19 +1353,21 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     if (missingReadmes.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d readmes', name, missingReadmes.length);
+    that.log("  [%s] saving %d readmes", name, missingReadmes.length);
 
-    var res = yield gather(missingReadmes.map(function (item) {
-      return packageService.updateModuleReadme(item.id, item.readme);
-    }));
+    var res = yield gather(
+      missingReadmes.map(function(item) {
+        return packageService.updateModuleReadme(item.id, item.readme);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingReadmes[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, id: %s, error: %s', item.id, r.error.message);
+        that.log("    save error, id: %s, error: %s", item.id, r.error.message);
       } else {
-        that.log('    saved, id: %s', item.id);
+        that.log("    saved, id: %s", item.id);
       }
     }
   }
@@ -1081,19 +1376,34 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     if (missingModuleAbbreviateds.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d missing moduleAbbreviateds', name, missingModuleAbbreviateds.length);
+    that.log(
+      "  [%s] saving %d missing moduleAbbreviateds",
+      name,
+      missingModuleAbbreviateds.length
+    );
 
-    var res = yield gather(missingModuleAbbreviateds.map(function (item) {
-      return packageService.saveModuleAbbreviated(item);
-    }));
+    var res = yield gather(
+      missingModuleAbbreviateds.map(function(item) {
+        return packageService.saveModuleAbbreviated(item);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingModuleAbbreviateds[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save moduleAbbreviateds error, module: %s@%s, error: %s', item.name, item.version, r.error.message);
+        that.log(
+          "    save moduleAbbreviateds error, module: %s@%s, error: %s",
+          item.name,
+          item.version,
+          r.error.message
+        );
       } else {
-        that.log('    saved moduleAbbreviateds, module: %s@%s', item.name, item.version);
+        that.log(
+          "    saved moduleAbbreviateds, module: %s@%s",
+          item.name,
+          item.version
+        );
       }
     }
   }
@@ -1102,86 +1412,128 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     if (missingAbbreviatedMetadatas.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d abbreviated meta datas', name, missingAbbreviatedMetadatas.length);
+    that.log(
+      "  [%s] saving %d abbreviated meta datas",
+      name,
+      missingAbbreviatedMetadatas.length
+    );
 
-    var res = yield gather(missingAbbreviatedMetadatas.map(function (item) {
-      return packageService.updateModuleAbbreviatedPackage(item);
-    }));
+    var res = yield gather(
+      missingAbbreviatedMetadatas.map(function(item) {
+        return packageService.updateModuleAbbreviatedPackage(item);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingAbbreviatedMetadatas[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, module_abbreviated: %s@%s, error: %s',
-          item.name, item.version, r.error.stack);
+        that.log(
+          "    save error, module_abbreviated: %s@%s, error: %s",
+          item.name,
+          item.version,
+          r.error.stack
+        );
       } else {
-        that.log('    saved, module_abbreviated: %s@%s, %j', item.name, item.version, item);
+        that.log(
+          "    saved, module_abbreviated: %s@%s, %j",
+          item.name,
+          item.version,
+          item
+        );
       }
     }
 
-    var res = yield gather(missingAbbreviatedMetadatas.map(function (item) {
-      var fields = {};
-      for (var key in item) {
-        if (key === 'id' || key === 'name' || key === 'version') {
-          continue;
+    var res = yield gather(
+      missingAbbreviatedMetadatas.map(function(item) {
+        var fields = {};
+        for (var key in item) {
+          if (key === "id" || key === "name" || key === "version") {
+            continue;
+          }
+          fields[key] = item[key];
         }
-        fields[key] = item[key];
-      }
-      return packageService.updateModulePackageFields(item.id, fields);
-    }));
+        return packageService.updateModulePackageFields(item.id, fields);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingAbbreviatedMetadatas[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, module id: %s, error: %s', item.id, r.error.stack);
+        that.log(
+          "    save error, module id: %s, error: %s",
+          item.id,
+          r.error.stack
+        );
       } else {
-        that.log('    saved, module id: %s, %j', item.id, item);
+        that.log("    saved, module id: %s, %j", item.id, item);
       }
     }
   }
 
-  function *syncDeprecatedsOnExistsModuleAbbreviated() {
+  function* syncDeprecatedsOnExistsModuleAbbreviated() {
     if (missingDeprecatedsOnExistsModuleAbbreviated.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d module abbreviated deprecated fields',
-      name, missingDeprecatedsOnExistsModuleAbbreviated.length);
+    that.log(
+      "  [%s] saving %d module abbreviated deprecated fields",
+      name,
+      missingDeprecatedsOnExistsModuleAbbreviated.length
+    );
 
-    var res = yield gather(missingDeprecatedsOnExistsModuleAbbreviated.map(function (item) {
-      return packageService.updateModuleAbbreviatedPackage(item);
-    }));
+    var res = yield gather(
+      missingDeprecatedsOnExistsModuleAbbreviated.map(function(item) {
+        return packageService.updateModuleAbbreviatedPackage(item);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingDeprecatedsOnExistsModuleAbbreviated[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, module abbreviated: %s@%s, error: %s', item.name, item.version, r.error.message);
+        that.log(
+          "    save error, module abbreviated: %s@%s, error: %s",
+          item.name,
+          item.version,
+          r.error.message
+        );
       } else {
-        that.log('    saved, module abbreviated: %s@%s, deprecated: %j', item.name, item.version, item.deprecated);
+        that.log(
+          "    saved, module abbreviated: %s@%s, deprecated: %j",
+          item.name,
+          item.version,
+          item.deprecated
+        );
       }
     }
   }
 
-  function *syncDeprecateds() {
+  function* syncDeprecateds() {
     if (missingDeprecateds.length === 0) {
       return;
     }
-    that.log('  [%s] saving %d Deprecated fields', name, missingDeprecateds.length);
+    that.log(
+      "  [%s] saving %d Deprecated fields",
+      name,
+      missingDeprecateds.length
+    );
 
-    var res = yield gather(missingDeprecateds.map(function (item) {
-      return packageService.updateModulePackageFields(item.id, {
-        deprecated: item.deprecated
-      });
-    }));
+    var res = yield gather(
+      missingDeprecateds.map(function(item) {
+        return packageService.updateModulePackageFields(item.id, {
+          deprecated: item.deprecated
+        });
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var item = missingDeprecateds[i];
       var r = res[i];
       if (r.error) {
-        that.log('    save error, id: %s, error: %s', item.id, r.error.message);
+        that.log("    save error, id: %s, error: %s", item.id, r.error.message);
       } else {
-        that.log('    saved, id: %s, deprecated: %j', item.id, item.deprecated);
+        that.log("    saved, id: %s, deprecated: %j", item.id, item.deprecated);
       }
     }
   }
@@ -1194,10 +1546,10 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     }
     var rows = yield User.listByNames(names);
     var map = {};
-    rows.forEach(function (r) {
+    rows.forEach(function(r) {
       map[r.name] = r;
     });
-    names.forEach(function (username) {
+    names.forEach(function(username) {
       var r = map[username];
       if (!r || !r.json) {
         if (username[0] !== '"' && username[0] !== "'") {
@@ -1207,20 +1559,27 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
     });
 
     if (missingUsers.length === 0) {
-      that.log('  [%s] all %d npm users exists', name, names.length);
+      that.log("  [%s] all %d npm users exists", name, names.length);
       return;
     }
 
-    that.log('  [%s] saving %d/%d missing npm users: %j',
-      name, missingUsers.length, names.length, missingUsers);
-    var res = yield gather(missingUsers.map(function (username) {
-      return _saveNpmUser(username);
-    }));
+    that.log(
+      "  [%s] saving %d/%d missing npm users: %j",
+      name,
+      missingUsers.length,
+      names.length,
+      missingUsers
+    );
+    var res = yield gather(
+      missingUsers.map(function(username) {
+        return _saveNpmUser(username);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var r = res[i];
       if (r.error) {
-        that.log('    save npm user error, %s', r.error.message);
+        that.log("    save npm user error, %s", r.error.message);
       }
     }
   }
@@ -1231,15 +1590,17 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
       return;
     }
 
-    that.log('  [%s] saving %d star users', name, missingStarUsers.length);
-    var res = yield gather(missingStarUsers.map(function (username) {
-      return packageService.addStar(name, username);
-    }));
+    that.log("  [%s] saving %d star users", name, missingStarUsers.length);
+    var res = yield gather(
+      missingStarUsers.map(function(username) {
+        return packageService.addStar(name, username);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var r = res[i];
       if (r.error) {
-        that.log('    add star user error, %s', r.error.stack);
+        that.log("    add star user error, %s", r.error.stack);
       }
     }
   }
@@ -1250,27 +1611,39 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
       return;
     }
 
-    that.log('  [%s] syncing %d diff package maintainers: %j',
-      name, diffNpmMaintainers.length, diffNpmMaintainers);
-    var res = yield gather(diffNpmMaintainers.map(function (item) {
-      return _saveMaintainer(name, item[0], item[1]);
-    }));
+    that.log(
+      "  [%s] syncing %d diff package maintainers: %j",
+      name,
+      diffNpmMaintainers.length,
+      diffNpmMaintainers
+    );
+    var res = yield gather(
+      diffNpmMaintainers.map(function(item) {
+        return _saveMaintainer(name, item[0], item[1]);
+      })
+    );
 
     for (var i = 0; i < res.length; i++) {
       var r = res[i];
       if (r.error) {
-        that.log('    save package maintainer error, %s', r.error.stack);
+        that.log("    save package maintainer error, %s", r.error.stack);
       }
     }
   }
 
   if (latestVersionPackageReadme.version && latestVersionPackageReadme.readme) {
     var existsPackageReadme = yield packageService.getPackageReadme(name, true);
-    if (!existsPackageReadme ||
-        existsPackageReadme.version !== latestVersionPackageReadme.version ||
-        existsPackageReadme.readme !== latestVersionPackageReadme.readme) {
-      var r = yield packageService.savePackageReadme(name, latestVersionPackageReadme.readme, latestVersionPackageReadme.version);
-      that.log('    save packageReadme: %s %s %s', r.id, r.name, r.version);
+    if (
+      !existsPackageReadme ||
+      existsPackageReadme.version !== latestVersionPackageReadme.version ||
+      existsPackageReadme.readme !== latestVersionPackageReadme.readme
+    ) {
+      var r = yield packageService.savePackageReadme(
+        name,
+        latestVersionPackageReadme.readme,
+        latestVersionPackageReadme.version
+      );
+      that.log("    save packageReadme: %s %s %s", r.id, r.name, r.version);
     }
   }
 
@@ -1288,26 +1661,33 @@ SyncModuleWorker.prototype._sync = function* (name, pkg) {
   changedVersions = Object.keys(changedVersions);
   // hooks
   const envelope = {
-    event: 'package:sync',
+    event: "package:sync",
     name: name,
-    type: 'package',
+    type: "package",
     version: null,
     hookOwner: null,
     payload: {
-      changedVersions,
+      changedVersions
     },
-    change: null,
+    change: null
   };
   hook.trigger(envelope);
 
   return syncedVersionNames;
 };
 
-SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePackage) {
+SyncModuleWorker.prototype._syncOneVersion = function*(
+  versionIndex,
+  sourcePackage
+) {
   var delay = Date.now() - sourcePackage.publish_time;
-  logger.syncInfo('[sync_module_worker] delay: %s ms, publish_time: %s, start sync %s@%s',
-    delay, utility.logDate(new Date(sourcePackage.publish_time)),
-    sourcePackage.name, sourcePackage.version);
+  logger.syncInfo(
+    "[sync_module_worker] delay: %s ms, publish_time: %s, start sync %s@%s",
+    delay,
+    utility.logDate(new Date(sourcePackage.publish_time)),
+    sourcePackage.name,
+    sourcePackage.version
+  );
   var that = this;
   var username = this.username;
   var downurl = sourcePackage.dist.tarball;
@@ -1321,9 +1701,9 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     followRedirect: true,
     timeout: 600000, // 10 minutes download
     headers: {
-      'user-agent': USER_AGENT,
+      "user-agent": USER_AGENT
     },
-    gzip: true,
+    gzip: true
   };
   if (config.syncDownloadOptions) {
     Object.assign(downloadOptions, config.syncDownloadOptions);
@@ -1335,14 +1715,20 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     devDependencies = Object.keys(sourcePackage.devDependencies || {});
   }
 
-  that.log('    [%s:%d] syncing, delay: %s ms, version: %s, dist: %j, no deps: %s, ' +
-   'publish on cnpm: %s, dependencies: %d, devDependencies: %d, syncDevDependencies: %s',
-    sourcePackage.name, versionIndex,
+  that.log(
+    "    [%s:%d] syncing, delay: %s ms, version: %s, dist: %j, no deps: %s, " +
+      "publish on cnpm: %s, dependencies: %d, devDependencies: %d, syncDevDependencies: %s",
+    sourcePackage.name,
+    versionIndex,
     delay,
     sourcePackage.version,
-    sourcePackage.dist, that.noDep, that._publish,
+    sourcePackage.dist,
+    that.noDep,
+    that._publish,
     dependencies.length,
-    devDependencies.length, this.syncDevDependencies);
+    devDependencies.length,
+    this.syncDevDependencies
+  );
 
   if (dependencies.length > config.maxDependencies) {
     dependencies = dependencies.slice(0, config.maxDependencies);
@@ -1365,17 +1751,26 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
   // add module dependence
   yield packageService.addDependencies(sourcePackage.name, dependencies);
 
-  var shasum = crypto.createHash('sha1');
+  var shasum = crypto.createHash("sha1");
   var dataSize = 0;
 
   try {
     // get tarball
-    logger.syncInfo('[sync_module_worker] downloading %j to %j', downurl, filepath);
+    logger.syncInfo(
+      "[sync_module_worker] downloading %j to %j",
+      downurl,
+      filepath
+    );
     var r;
     try {
       r = yield urllib.request(downurl, downloadOptions);
     } catch (err) {
-      logger.syncInfo('[sync_module_worker] download %j to %j error: %s', downurl, filepath, err);
+      logger.syncInfo(
+        "[sync_module_worker] download %j to %j error: %s",
+        downurl,
+        filepath,
+        err
+      );
       throw err;
     }
 
@@ -1389,17 +1784,19 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     // }
 
     if (statusCode !== 200) {
-      var err = new Error('Download ' + downurl + ' fail, status: ' + statusCode);
-      err.name = 'DownloadTarballError';
+      var err = new Error(
+        "Download " + downurl + " fail, status: " + statusCode
+      );
+      err.name = "DownloadTarballError";
       err.data = sourcePackage;
       err.status = statusCode;
-      logger.syncInfo('[sync_module_worker] %s', err.message);
+      logger.syncInfo("[sync_module_worker] %s", err.message);
       throw err;
     }
 
     // read and check
     var rs = fs.createReadStream(filepath);
-    rs.on('data', function (data) {
+    rs.on("data", function(data) {
       shasum.update(data);
       dataSize += data.length;
     });
@@ -1407,21 +1804,27 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     yield end(); // after end event emit
 
     if (dataSize === 0) {
-      var err = new Error('Download ' + downurl + ' file size is zero');
-      err.name = 'DownloadTarballSizeZeroError';
+      var err = new Error("Download " + downurl + " file size is zero");
+      err.name = "DownloadTarballSizeZeroError";
       err.data = sourcePackage;
-      logger.syncInfo('[sync_module_worker] %s', err.message);
+      logger.syncInfo("[sync_module_worker] %s", err.message);
       throw err;
     }
 
     // check shasum
-    shasum = shasum.digest('hex');
+    shasum = shasum.digest("hex");
     if (shasum !== sourcePackage.dist.shasum) {
-      var err = new Error('Download ' + downurl + ' shasum:' + shasum +
-        ' not match ' + sourcePackage.dist.shasum);
-      err.name = 'DownloadTarballShasumError';
+      var err = new Error(
+        "Download " +
+          downurl +
+          " shasum:" +
+          shasum +
+          " not match " +
+          sourcePackage.dist.shasum
+      );
+      err.name = "DownloadTarballShasumError";
       err.data = sourcePackage;
-      logger.syncInfo('[sync_module_worker] %s', err.message);
+      logger.syncInfo("[sync_module_worker] %s", err.message);
       throw err;
     }
 
@@ -1431,34 +1834,43 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
       shasum: shasum
     };
     // upload to NFS
-    logger.syncInfo('[sync_module_worker] uploading %j to nfs', uploadOptions);
+    logger.syncInfo("[sync_module_worker] uploading %j to nfs", uploadOptions);
     var result;
     try {
       result = yield nfs.upload(filepath, uploadOptions);
     } catch (err) {
-      logger.syncInfo('[sync_module_worker] upload %j to nfs error: %s', err);
+      logger.syncInfo("[sync_module_worker] upload %j to nfs error: %s", err);
       throw err;
     }
-    logger.syncInfo('[sync_module_worker] uploaded, saving %j to database', result);
+    logger.syncInfo(
+      "[sync_module_worker] uploaded, saving %j to database",
+      result
+    );
     var r = yield afterUpload(result);
-    logger.syncInfo('[sync_module_worker] sync %s@%s done!',
-      sourcePackage.name, sourcePackage.version);
+    logger.syncInfo(
+      "[sync_module_worker] sync %s@%s done!",
+      sourcePackage.name,
+      sourcePackage.version
+    );
     return r;
   } finally {
     // remove tmp file whatever
     fs.unlink(filepath, utility.noop);
   }
 
-  function *afterUpload(result) {
-    //make sure sync module have the correct author info
-    //only if can not get maintainers, use the username
+  function* afterUpload(result) {
+    // make sure sync module have the correct author info
+    // only if can not get maintainers, use the username
     var author = username;
-    if (Array.isArray(sourcePackage.maintainers) && sourcePackage.maintainers.length > 0) {
+    if (
+      Array.isArray(sourcePackage.maintainers) &&
+      sourcePackage.maintainers.length > 0
+    ) {
       author = sourcePackage.maintainers[0].name || username;
     } else if (sourcePackage._npmUser && sourcePackage._npmUser.name) {
       // try to use _npmUser instead
       author = sourcePackage._npmUser.name;
-      sourcePackage.maintainers = [ sourcePackage._npmUser ];
+      sourcePackage.maintainers = [sourcePackage._npmUser];
     }
 
     var mod = {
@@ -1466,7 +1878,7 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
       name: sourcePackage.name,
       package: sourcePackage,
       author: author,
-      publish_time: sourcePackage.publish_time,
+      publish_time: sourcePackage.publish_time
     };
 
     // delete _publish_on_cnpm, because other cnpm maybe sync from current cnpm
@@ -1479,7 +1891,7 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     var dist = {
       shasum: shasum,
       size: dataSize,
-      noattachment: dataSize === 0,
+      noattachment: dataSize === 0
     };
 
     if (result.url) {
@@ -1493,27 +1905,34 @@ SyncModuleWorker.prototype._syncOneVersion = function *(versionIndex, sourcePack
     var r = yield packageService.saveModule(mod);
     var moduleAbbreviatedId = null;
     if (config.enableAbbreviatedMetadata) {
-      var moduleAbbreviatedResult = yield packageService.saveModuleAbbreviated(mod);
+      var moduleAbbreviatedResult = yield packageService.saveModuleAbbreviated(
+        mod
+      );
       moduleAbbreviatedId = moduleAbbreviatedResult.id;
     }
 
-    that.log('    [%s:%s] done, insertId: %s, author: %s, version: %s, '
-      + 'size: %d, publish_time: %j, publish on cnpm: %s, '
-      + 'moduleAbbreviatedId: %s',
-      sourcePackage.name, versionIndex,
+    that.log(
+      "    [%s:%s] done, insertId: %s, author: %s, version: %s, " +
+        "size: %d, publish_time: %j, publish on cnpm: %s, " +
+        "moduleAbbreviatedId: %s",
+      sourcePackage.name,
+      versionIndex,
       r.id,
-      author, mod.version, dataSize,
+      author,
+      mod.version,
+      dataSize,
       new Date(mod.publish_time),
       that._publish,
-      moduleAbbreviatedId);
+      moduleAbbreviatedId
+    );
 
     return r;
   }
 };
 
-SyncModuleWorker.sync = function* (name, username, options) {
+SyncModuleWorker.sync = function*(name, username, options) {
   options = options || {};
-  var result = yield logService.create({name: name, username: username});
+  var result = yield logService.create({ name: name, username: username });
   var worker = new SyncModuleWorker({
     logId: result.id,
     type: options.type,
@@ -1521,7 +1940,7 @@ SyncModuleWorker.sync = function* (name, username, options) {
     username: username,
     noDep: options.noDep,
     publish: options.publish,
-    syncUpstreamFirst: options.syncUpstreamFirst,
+    syncUpstreamFirst: options.syncUpstreamFirst
   });
   worker.start();
   return result.id;
