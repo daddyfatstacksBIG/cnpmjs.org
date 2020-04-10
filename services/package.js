@@ -1,9 +1,9 @@
-'use strict';
+"use strict";
 
-var semver = require('semver');
-var models = require('../models');
-var common = require('./common');
-var config = require('../config');
+var semver = require("semver");
+var models = require("../models");
+var common = require("./common");
+var config = require("../config");
 var Tag = models.Tag;
 var User = models.User;
 var Module = models.Module;
@@ -16,12 +16,12 @@ var NpmModuleMaintainer = models.NpmModuleMaintainer;
 
 // module
 var _parseRow = function(row) {
-  if (row.package.indexOf('%7B%22') === 0) {
+  if (row.package.indexOf("%7B%22") === 0) {
     // now store package will encodeURIComponent() after JSON.stringify
     row.package = decodeURIComponent(row.package);
   }
   row.package = JSON.parse(row.package);
-  if (typeof row.publish_time === 'string') {
+  if (typeof row.publish_time === "string") {
     // pg bigint is string
     row.publish_time = Number(row.publish_time);
   }
@@ -33,8 +33,13 @@ function parseRow(row) {
     try {
       _parseRow(row);
     } catch (e) {
-      console.warn('parse package error: %s, id: %s version: %s, error: %s',
-                   row.name, row.id, row.version, e);
+      console.warn(
+        "parse package error: %s, id: %s version: %s, error: %s",
+        row.name,
+        row.id,
+        row.version,
+        e
+      );
     }
   }
 }
@@ -65,14 +70,16 @@ exports.getModuleByTag = function*(name, tag) {
 };
 
 exports.getModuleByRange = function*(name, range) {
-  var rows = yield exports.listModulesByName(name, [ 'id', 'version' ]);
+  var rows = yield exports.listModulesByName(name, ["id", "version"]);
   var versionMap = {};
-  var versions =
-      rows.map(function(row) {
-            versionMap[row.version] = row;
-            return row.version;
-          })
-          .filter(function(version) { return semver.valid(version); });
+  var versions = rows
+    .map(function(row) {
+      versionMap[row.version] = row;
+      return row.version;
+    })
+    .filter(function(version) {
+      return semver.valid(version);
+    });
 
   var version = semver.maxSatisfying(versions, range);
   if (!versionMap[version]) {
@@ -83,22 +90,26 @@ exports.getModuleByRange = function*(name, range) {
   return yield exports.getModuleById(id);
 };
 
-exports.getLatestModule = function*
-    (name) { return yield exports.getModuleByTag(name, 'latest'); };
+exports.getLatestModule = function*(name) {
+  return yield exports.getModuleByTag(name, "latest");
+};
 
 // module:list
 
 exports.listPrivateModulesByScope = function*(scope) {
-  var tags = yield Tag.findAll(
-      {where : {tag : 'latest', name : {like : scope + '/%'}}});
+  var tags = yield Tag.findAll({
+    where: { tag: "latest", name: { like: scope + "/%" } }
+  });
 
   if (tags.length === 0) {
     return [];
   }
 
-  var ids = tags.map(function(tag) { return tag.module_id; });
+  var ids = tags.map(function(tag) {
+    return tag.module_id;
+  });
 
-  return yield Module.findAll({where : {id : ids}});
+  return yield Module.findAll({ where: { id: ids } });
 };
 
 exports.listModules = function*(names) {
@@ -107,20 +118,18 @@ exports.listModules = function*(names) {
   }
 
   // fetch latest module tags
-  var tags = yield Tag.findAll({where : {name : names, tag : 'latest'}});
+  var tags = yield Tag.findAll({ where: { name: names, tag: "latest" } });
   if (tags.length === 0) {
     return [];
   }
 
-  var ids = tags.map(function(tag) { return tag.module_id; });
+  var ids = tags.map(function(tag) {
+    return tag.module_id;
+  });
 
   var rows = yield Module.findAll({
-    where : {id : ids},
-    attributes : [
-      'name',
-      'description',
-      'version',
-    ]
+    where: { id: ids },
+    attributes: ["name", "description", "version"]
   });
   return rows;
 };
@@ -131,10 +140,12 @@ exports.listModulesByUser = function*(username) {
 };
 
 exports.listModuleNamesByUser = function*(username) {
-  var sql = 'SELECT distinct(name) AS name FROM module WHERE author=?;';
-  var rows = yield models.query(sql, [ username ]);
+  var sql = "SELECT distinct(name) AS name FROM module WHERE author=?;";
+  var rows = yield models.query(sql, [username]);
   var map = {};
-  var names = rows.map(function(r) { return r.name; });
+  var names = rows.map(function(r) {
+    return r.name;
+  });
 
   // find from npm module maintainer table
   var moduleNames = yield NpmModuleMaintainer.listModuleNamesByUser(username);
@@ -161,16 +172,20 @@ exports.listPublicModulesByUser = function*(username) {
 
 // return user all public package names
 exports.listPublicModuleNamesByUser = function*(username) {
-  var sql = 'SELECT distinct(name) AS name FROM module WHERE author=?;';
-  var rows = yield models.query(sql, [ username ]);
+  var sql = "SELECT distinct(name) AS name FROM module WHERE author=?;";
+  var rows = yield models.query(sql, [username]);
   var map = {};
-  var names = rows.map(function(r) { return r.name; }).filter(function(name) {
-    var matched = name[0] !== '@';
-    if (matched) {
-      map[name] = 1;
-    }
-    return matched;
-  });
+  var names = rows
+    .map(function(r) {
+      return r.name;
+    })
+    .filter(function(name) {
+      var matched = name[0] !== "@";
+      if (matched) {
+        map[name] = 1;
+      }
+      return matched;
+    });
 
   // find from npm module maintainer table
   var moduleNames = yield NpmModuleMaintainer.listModuleNamesByUser(username);
@@ -183,35 +198,40 @@ exports.listPublicModuleNamesByUser = function*(username) {
 };
 
 // start must be a date or timestamp
-exports.listPublicModuleNamesSince = function*
-    listPublicModuleNamesSince(start) {
-      if (!(start instanceof Date)) {
-        start = new Date(Number(start));
-      }
-      var rows = yield Tag.findAll({
-        attributes : [ 'name' ],
-        where : {gmt_modified : {gt : start}},
-      });
-      var names = {};
-      for (var i = 0; i < rows.length; i++) {
-        names[rows[i].name] = 1;
-      }
-      return Object.keys(names);
-    };
+exports.listPublicModuleNamesSince = function* listPublicModuleNamesSince(
+  start
+) {
+  if (!(start instanceof Date)) {
+    start = new Date(Number(start));
+  }
+  var rows = yield Tag.findAll({
+    attributes: ["name"],
+    where: { gmt_modified: { gt: start } }
+  });
+  var names = {};
+  for (var i = 0; i < rows.length; i++) {
+    names[rows[i].name] = 1;
+  }
+  return Object.keys(names);
+};
 
 exports.listAllPublicModuleNames = function*() {
-  var sql = 'SELECT DISTINCT(name) AS name FROM tag ORDER BY name';
+  var sql = "SELECT DISTINCT(name) AS name FROM tag ORDER BY name";
   var rows = yield models.query(sql);
   return rows
-      .filter(function(row) { return !common.isPrivatePackage(row.name); })
-      .map(function(row) { return row.name; });
+    .filter(function(row) {
+      return !common.isPrivatePackage(row.name);
+    })
+    .map(function(row) {
+      return row.name;
+    });
 };
 
 exports.listModulesByName = function*(moduleName, attributes) {
   var mods = yield Module.findAll({
-    where : {name : moduleName},
-    order : [ [ 'id', 'DESC' ] ],
-    attributes,
+    where: { name: moduleName },
+    order: [["id", "DESC"]],
+    attributes
   });
 
   for (var mod of mods) {
@@ -222,23 +242,23 @@ exports.listModulesByName = function*(moduleName, attributes) {
 
 exports.getModuleLastModified = function*(name) {
   var mod = yield Module.find({
-    where : {
-      name : name,
+    where: {
+      name: name
     },
-    order : [ [ 'gmt_modified', 'DESC' ] ],
-    attributes : [ 'gmt_modified' ]
+    order: [["gmt_modified", "DESC"]],
+    attributes: ["gmt_modified"]
   });
-  return mod && mod.gmt_modified || null;
+  return (mod && mod.gmt_modified) || null;
 };
 
 // module:update
 exports.saveModule = function*(mod) {
   var keywords = mod.package.keywords;
-  if (typeof keywords === 'string') {
-    keywords = [ keywords ];
+  if (typeof keywords === "string") {
+    keywords = [keywords];
   }
   var pkg = stringifyPackage(mod.package);
-  var description = mod.package && mod.package.description || '';
+  var description = (mod.package && mod.package.description) || "";
   var dist = mod.package.dist || {};
   // dist.tarball = '';
   // dist.shasum = '';
@@ -246,7 +266,7 @@ exports.saveModule = function*(mod) {
   var publish_time = mod.publish_time || Date.now();
   var item = yield Module.findByNameAndVersion(mod.name, mod.version);
   if (!item) {
-    item = Module.build({name : mod.name, version : mod.version});
+    item = Module.build({ name: mod.name, version: mod.version });
   }
   item.publish_time = publish_time;
   // meaning first maintainer, more maintainers please check module_maintainer
@@ -261,7 +281,7 @@ exports.saveModule = function*(mod) {
   if (item.changed()) {
     item = yield item.save();
   }
-  var result = {id : item.id, gmt_modified : item.gmt_modified};
+  var result = { id: item.id, gmt_modified: item.gmt_modified };
 
   if (!Array.isArray(keywords)) {
     return result;
@@ -270,7 +290,7 @@ exports.saveModule = function*(mod) {
   var words = [];
   for (var i = 0; i < keywords.length; i++) {
     var w = keywords[i];
-    if (typeof w === 'string') {
+    if (typeof w === "string") {
       w = w.trim();
       if (w) {
         words.push(w);
@@ -292,15 +312,15 @@ exports.listModuleAbbreviatedsByName = function*(name) {
   }
 
   var rows = yield models.ModuleAbbreviated.findAll({
-    where : {
-      name : name,
+    where: {
+      name: name
     },
-    order : [ [ 'id', 'DESC' ] ],
+    order: [["id", "DESC"]]
   });
 
   for (var row of rows) {
     row.package = JSON.parse(row.package);
-    if (row.publish_time && typeof row.publish_time === 'string') {
+    if (row.publish_time && typeof row.publish_time === "string") {
       // pg bigint is string
       row.publish_time = Number(row.publish_time);
     }
@@ -314,7 +334,7 @@ exports.findAllModuleAbbreviateds = function*(where, order, limit, offset) {
     order,
     limit,
     offset,
-    attributes : [ 'name', 'version', 'publish_time', 'gmt_modified' ],
+    attributes: ["name", "version", "publish_time", "gmt_modified"]
   };
   const rows = yield models.ModuleAbbreviated.findAll(params);
   return rows;
@@ -323,28 +343,30 @@ exports.findAllModuleAbbreviateds = function*(where, order, limit, offset) {
 // https://github.com/npm/registry/blob/master/docs/responses/package-metadata.md#abbreviated-version-object
 exports.saveModuleAbbreviated = function*(mod) {
   var pkg = JSON.stringify({
-    name : mod.package.name,
-    version : mod.package.version,
-    deprecated : mod.package.deprecated,
-    dependencies : mod.package.dependencies,
-    optionalDependencies : mod.package.optionalDependencies,
-    devDependencies : mod.package.devDependencies,
-    bundleDependencies : mod.package.bundleDependencies,
-    peerDependencies : mod.package.peerDependencies,
-    bin : mod.package.bin,
-    directories : mod.package.directories,
-    dist : mod.package.dist,
-    engines : mod.package.engines,
-    _hasShrinkwrap : mod.package._hasShrinkwrap,
-    _publish_on_cnpm : mod.package._publish_on_cnpm,
+    name: mod.package.name,
+    version: mod.package.version,
+    deprecated: mod.package.deprecated,
+    dependencies: mod.package.dependencies,
+    optionalDependencies: mod.package.optionalDependencies,
+    devDependencies: mod.package.devDependencies,
+    bundleDependencies: mod.package.bundleDependencies,
+    peerDependencies: mod.package.peerDependencies,
+    bin: mod.package.bin,
+    directories: mod.package.directories,
+    dist: mod.package.dist,
+    engines: mod.package.engines,
+    _hasShrinkwrap: mod.package._hasShrinkwrap,
+    _publish_on_cnpm: mod.package._publish_on_cnpm
   });
   var publish_time = mod.publish_time || Date.now();
-  var item = yield models.ModuleAbbreviated.findByNameAndVersion(mod.name,
-                                                                 mod.version);
+  var item = yield models.ModuleAbbreviated.findByNameAndVersion(
+    mod.name,
+    mod.version
+  );
   if (!item) {
     item = models.ModuleAbbreviated.build({
-      name : mod.name,
-      version : mod.version,
+      name: mod.name,
+      version: mod.version
     });
   }
   item.publish_time = publish_time;
@@ -354,8 +376,8 @@ exports.saveModuleAbbreviated = function*(mod) {
     item = yield item.save();
   }
   var result = {
-    id : item.id,
-    gmt_modified : item.gmt_modified,
+    id: item.id,
+    gmt_modified: item.gmt_modified
   };
 
   return result;
@@ -368,7 +390,7 @@ exports.updateModulePackage = function*(id, pkg) {
     return null;
   }
   mod.package = stringifyPackage(pkg);
-  return yield mod.save([ 'package' ]);
+  return yield mod.save(["package"]);
 };
 
 exports.updateModulePackageFields = function*(id, fields) {
@@ -385,21 +407,23 @@ exports.updateModulePackageFields = function*(id, fields) {
 
 exports.updateModuleAbbreviatedPackage = function*(item) {
   // item => { id, name, version, _hasShrinkwrap }
-  var mod = yield models.ModuleAbbreviated.findByNameAndVersion(item.name,
-                                                                item.version);
+  var mod = yield models.ModuleAbbreviated.findByNameAndVersion(
+    item.name,
+    item.version
+  );
   if (!mod) {
     return null;
   }
   var pkg = JSON.parse(mod.package);
   for (var key in item) {
-    if (key === 'name' || key === 'version' || key === 'id') {
+    if (key === "name" || key === "version" || key === "id") {
       continue;
     }
     pkg[key] = item[key];
   }
   mod.package = JSON.stringify(pkg);
 
-  return yield mod.save([ 'package' ]);
+  return yield mod.save(["package"]);
 };
 
 exports.updateModuleReadme = function*(id, readme) {
@@ -423,19 +447,19 @@ exports.updateModuleDescription = function*(id, description) {
   pkg.description = description;
   mod.package = stringifyPackage(pkg);
 
-  return yield mod.save([ 'description', 'package' ]);
+  return yield mod.save(["description", "package"]);
 };
 
 exports.updateModuleLastModified = function*(name) {
   var row = yield Module.find({
-    where : {name : name},
-    order : [ [ 'gmt_modified', 'DESC' ] ],
+    where: { name: name },
+    order: [["gmt_modified", "DESC"]]
   });
   if (!row) {
     return null;
   }
   // gmt_modified is readonly, we must use setDataValue
-  row.setDataValue('gmt_modified', new Date());
+  row.setDataValue("gmt_modified", new Date());
   return yield row.save();
 };
 
@@ -445,8 +469,8 @@ exports.getPackageReadme = function*(name, onlyPackageReadme) {
     var row = yield models.PackageReadme.findByName(name);
     if (row) {
       return {
-        version : row.version,
-        readme : row.readme,
+        version: row.version,
+        readme: row.readme
       };
     }
     if (onlyPackageReadme) {
@@ -457,17 +481,17 @@ exports.getPackageReadme = function*(name, onlyPackageReadme) {
   var mod = yield exports.getLatestModule(name);
   if (mod) {
     return {
-      version : mod.package.version,
-      readme : mod.package.readme,
+      version: mod.package.version,
+      readme: mod.package.readme
     };
   }
 };
 
 exports.savePackageReadme = function*(name, readme, latestVersion) {
-  var item = yield models.PackageReadme.find({where : {name : name}});
+  var item = yield models.PackageReadme.find({ where: { name: name } });
   if (!item) {
     item = models.PackageReadme.build({
-      name : name,
+      name: name
     });
   }
   item.readme = readme;
@@ -477,32 +501,32 @@ exports.savePackageReadme = function*(name, readme, latestVersion) {
 
 exports.removeModulesByName = function*(name) {
   yield Module.destroy({
-    where : {
-      name : name,
-    },
+    where: {
+      name: name
+    }
   });
   if (config.enableAbbreviatedMetadata) {
     yield models.ModuleAbbreviated.destroy({
-      where : {
-        name : name,
-      },
+      where: {
+        name: name
+      }
     });
   }
 };
 
 exports.removeModulesByNameAndVersions = function*(name, versions) {
   yield Module.destroy({
-    where : {
-      name : name,
-      version : versions,
+    where: {
+      name: name,
+      version: versions
     }
   });
   if (config.enableAbbreviatedMetadata) {
     yield models.ModuleAbbreviated.destroy({
-      where : {
-        name : name,
-        version : versions,
-      },
+      where: {
+        name: name,
+        version: versions
+      }
     });
   }
 };
@@ -517,7 +541,7 @@ exports.addModuleTag = function*(name, tag, version) {
 
   var row = yield Tag.findByNameAndTag(name, tag);
   if (!row) {
-    row = Tag.build({name : name, tag : tag});
+    row = Tag.build({ name: name, tag: tag });
   }
   row.module_id = mod.id;
   row.version = version;
@@ -527,33 +551,40 @@ exports.addModuleTag = function*(name, tag, version) {
   return row;
 };
 
-exports.getModuleTag = function*
-    (name, tag) { return yield Tag.findByNameAndTag(name, tag); };
-
-exports.removeModuleTags = function*
-    (name) { return yield Tag.destroy({where : {name : name}}); };
-
-exports.removeModuleTagsByIds = function*
-    (ids) { return yield Tag.destroy({where : {id : ids}}); };
-
-exports.removeModuleTagsByNames = function*(moduleName, tagNames) {
-  return yield Tag.destroy({where : {name : moduleName, tag : tagNames}});
+exports.getModuleTag = function*(name, tag) {
+  return yield Tag.findByNameAndTag(name, tag);
 };
 
-exports.listModuleTags = function*
-    (name) { return yield Tag.findAll({where : {name : name}}); };
+exports.removeModuleTags = function*(name) {
+  return yield Tag.destroy({ where: { name: name } });
+};
+
+exports.removeModuleTagsByIds = function*(ids) {
+  return yield Tag.destroy({ where: { id: ids } });
+};
+
+exports.removeModuleTagsByNames = function*(moduleName, tagNames) {
+  return yield Tag.destroy({ where: { name: moduleName, tag: tagNames } });
+};
+
+exports.listModuleTags = function*(name) {
+  return yield Tag.findAll({ where: { name: name } });
+};
 
 // dependencies
 
 // name => dependency
 exports.addDependency = function*(name, dependency) {
-  var row = yield ModuleDependency.find(
-      {where : {name : dependency, dependent : name}});
+  var row = yield ModuleDependency.find({
+    where: { name: dependency, dependent: name }
+  });
   if (row) {
     return row;
   }
-  return yield ModuleDependency.build({name : dependency, dependent : name})
-      .save();
+  return yield ModuleDependency.build({
+    name: dependency,
+    dependent: name
+  }).save();
 };
 
 exports.addDependencies = function*(name, dependencies) {
@@ -565,21 +596,25 @@ exports.addDependencies = function*(name, dependencies) {
 };
 
 exports.listDependents = function*(dependency) {
-  var items = yield ModuleDependency.findAll({where : {name : dependency}});
-  return items.map(function(item) { return item.dependent; });
+  var items = yield ModuleDependency.findAll({ where: { name: dependency } });
+  return items.map(function(item) {
+    return item.dependent;
+  });
 };
 
 // maintainers
 
-exports.listPublicModuleMaintainers = function*
-    (name) { return yield NpmModuleMaintainer.listMaintainers(name); };
+exports.listPublicModuleMaintainers = function*(name) {
+  return yield NpmModuleMaintainer.listMaintainers(name);
+};
 
-exports.addPublicModuleMaintainer = function*(
-    name, user) { return yield NpmModuleMaintainer.addMaintainer(name, user); };
+exports.addPublicModuleMaintainer = function*(name, user) {
+  return yield NpmModuleMaintainer.addMaintainer(name, user);
+};
 
-exports.removePublicModuleMaintainer = function*
-    (name,
-     user) { return yield NpmModuleMaintainer.removeMaintainers(name, user); };
+exports.removePublicModuleMaintainer = function*(name, user) {
+  return yield NpmModuleMaintainer.removeMaintainers(name, user);
+};
 
 // only can add to cnpm maintainer table
 exports.addPrivateModuleMaintainers = function*(name, usernames) {
@@ -595,8 +630,9 @@ exports.updatePrivateModuleMaintainers = function*(name, usernames) {
 };
 
 function* getMaintainerModel(name) {
-  return common.isPrivatePackage(name) ? PrivateModuleMaintainer
-                                       : NpmModuleMaintainer;
+  return common.isPrivatePackage(name)
+    ? PrivateModuleMaintainer
+    : NpmModuleMaintainer;
 }
 
 exports.listMaintainers = function*(name) {
@@ -606,8 +642,9 @@ exports.listMaintainers = function*(name) {
     return usernames;
   }
   var users = yield User.listByNames(usernames);
-  return users.map(function(
-      user) { return {name : user.name, email : user.email}; });
+  return users.map(function(user) {
+    return { name: user.name, email: user.email };
+  });
 };
 
 exports.listMaintainerNamesOnly = function*(name) {
@@ -616,22 +653,27 @@ exports.listMaintainerNamesOnly = function*(name) {
 };
 
 exports.removeAllMaintainers = function*(name) {
-  return yield [PrivateModuleMaintainer.removeAllMaintainers(name),
-                NpmModuleMaintainer.removeAllMaintainers(name),
+  return yield [
+    PrivateModuleMaintainer.removeAllMaintainers(name),
+    NpmModuleMaintainer.removeAllMaintainers(name)
   ];
 };
 
 exports.authMaintainer = function*(packageName, username) {
   var mod = yield getMaintainerModel(packageName);
-  var rs = yield [mod.listMaintainers(packageName),
-                  exports.getLatestModule(packageName)];
+  var rs = yield [
+    mod.listMaintainers(packageName),
+    exports.getLatestModule(packageName)
+  ];
   var maintainers = rs[0];
   var latestMod = rs[1];
   if (maintainers.length === 0) {
     // if not found maintainers, try to get from latest module package info
     var ms = latestMod && latestMod.package && latestMod.package.maintainers;
     if (ms && ms.length > 0) {
-      maintainers = ms.map(function(user) { return user.name; });
+      maintainers = ms.map(function(user) {
+        return user.name;
+      });
     }
   }
 
@@ -647,7 +689,7 @@ exports.authMaintainer = function*(packageName, username) {
     isMaintainer = true;
   }
 
-  return {isMaintainer : isMaintainer, maintainers : maintainers};
+  return { isMaintainer: isMaintainer, maintainers: maintainers };
 };
 
 exports.isMaintainer = function*(name, username) {
@@ -674,8 +716,13 @@ exports.addKeyword = function*(data) {
 exports.addKeywords = function*(name, description, keywords) {
   var tasks = [];
   keywords.forEach(function(keyword) {
-    tasks.push(exports.addKeyword(
-        {name : name, keyword : keyword, description : description}));
+    tasks.push(
+      exports.addKeyword({
+        name: name,
+        keyword: keyword,
+        description: description
+      })
+    );
   });
   return yield tasks;
 };
@@ -685,7 +732,7 @@ exports.addKeywords = function*(name, description, keywords) {
 exports.search = function*(word, options) {
   options = options || {};
   var limit = options.limit || 100;
-  word = word.replace(/^%/, ''); // ignore prefix %
+  word = word.replace(/^%/, ""); // ignore prefix %
 
   // search flows:
   // 1. prefix search by name
@@ -694,35 +741,35 @@ exports.search = function*(word, options) {
   var ids = {};
 
   var sql =
-      'SELECT module_id FROM tag WHERE LOWER(name) LIKE LOWER(?) AND tag=\'latest\' \
-    ORDER BY name LIMIT ?;';
-  var rows = yield models.query(sql, [ word + '%', limit ]);
+    "SELECT module_id FROM tag WHERE LOWER(name) LIKE LOWER(?) AND tag='latest' \
+    ORDER BY name LIMIT ?;";
+  var rows = yield models.query(sql, [word + "%", limit]);
   for (var i = 0; i < rows.length; i++) {
     ids[rows[i].module_id] = 1;
   }
 
   if (rows.length < 20) {
-    rows = yield models.query(sql, [ '%' + word + '%', limit ]);
+    rows = yield models.query(sql, ["%" + word + "%", limit]);
     for (var i = 0; i < rows.length; i++) {
       ids[rows[i].module_id] = 1;
     }
   }
 
   var keywordRows = yield ModuleKeyword.findAll({
-    attributes : [ 'name', 'description' ],
-    where : {keyword : word},
-    limit : limit,
-    order : [ [ 'id', 'DESC' ] ]
+    attributes: ["name", "description"],
+    where: { keyword: word },
+    limit: limit,
+    order: [["id", "DESC"]]
   });
 
-  var data = {keywordMatchs : keywordRows, searchMatchs : []};
+  var data = { keywordMatchs: keywordRows, searchMatchs: [] };
 
   ids = Object.keys(ids);
   if (ids.length > 0) {
     data.searchMatchs = yield Module.findAll({
-      attributes : [ 'name', 'description' ],
-      where : {id : ids},
-      order : 'name'
+      attributes: ["name", "description"],
+      where: { id: ids },
+      order: "name"
     });
   }
 
@@ -732,32 +779,38 @@ exports.search = function*(word, options) {
 // module star
 
 exports.addStar = function* add(name, user) {
-  var row = yield ModuleStar.find({where : {name : name, user : user}});
+  var row = yield ModuleStar.find({ where: { name: name, user: user } });
   if (row) {
     return row;
   }
 
-  row = ModuleStar.build({name : name, user : user});
+  row = ModuleStar.build({ name: name, user: user });
   return yield row.save();
 };
 
 exports.removeStar = function*(name, user) {
-  return yield ModuleStar.destroy({where : {name : name, user : user}});
+  return yield ModuleStar.destroy({ where: { name: name, user: user } });
 };
 
 exports.listStarUserNames = function*(moduleName) {
-  var rows = yield ModuleStar.findAll({where : {name : moduleName}});
-  return rows.map(function(row) { return row.user; });
+  var rows = yield ModuleStar.findAll({ where: { name: moduleName } });
+  return rows.map(function(row) {
+    return row.user;
+  });
 };
 
 exports.listUserStarModuleNames = function*(user) {
-  var rows = yield ModuleStar.findAll({where : {user : user}});
-  return rows.map(function(row) { return row.name; });
+  var rows = yield ModuleStar.findAll({ where: { user: user } });
+  return rows.map(function(row) {
+    return row.name;
+  });
 };
 
 // unpublish info
-exports.saveUnpublishedModule = function*
-    (name, pkg) { return yield ModuleUnpublished.save(name, pkg); };
+exports.saveUnpublishedModule = function*(name, pkg) {
+  return yield ModuleUnpublished.save(name, pkg);
+};
 
-exports.getUnpublishedModule = function*
-    (name) { return yield ModuleUnpublished.findByName(name); };
+exports.getUnpublishedModule = function*(name) {
+  return yield ModuleUnpublished.findByName(name);
+};
